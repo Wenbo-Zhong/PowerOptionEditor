@@ -1,0 +1,7 @@
+*.exe
+*.pdb
+boot-error.txt
+*-dump.txt
+.vs/
+.grok/
+.agents/
