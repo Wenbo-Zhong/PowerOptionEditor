@@ -1009,6 +1009,7 @@ namespace PowerOptionEditor
         readonly Button _apply = new Button();
         readonly Button _defaults = new Button();
         readonly Label _status = new Label();
+        readonly Label _pending = new Label();
         readonly List<SettingRow> _rows = new List<SettingRow>();
         readonly Panel _bar = new Panel();
         readonly Panel _editorRow = new Panel();
@@ -1038,7 +1039,7 @@ namespace PowerOptionEditor
             root.Padding = new Padding(Dpi.S(8));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, Dpi.S(168)));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, Dpi.S(198)));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, Dpi.S(24)));
             Controls.Add(root);
 
@@ -1112,8 +1113,9 @@ namespace PowerOptionEditor
             TableLayoutPanel detail = new TableLayoutPanel();
             detail.Dock = DockStyle.Fill;
             detail.ColumnCount = 1;
-            detail.RowCount = 4;
+            detail.RowCount = 5;
             detail.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            detail.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             detail.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             detail.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             detail.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -1151,11 +1153,26 @@ namespace PowerOptionEditor
             _editorRow.Controls.Add(_dcCaption);
             _editorRow.Controls.Add(_dcList);
             _editorRow.Controls.Add(_dcBox);
+            _acBox.TextChanged += delegate { UpdatePendingChanges(); };
+            _dcBox.TextChanged += delegate { UpdatePendingChanges(); };
+            _acList.SelectedIndexChanged += delegate { UpdatePendingChanges(); };
+            _dcList.SelectedIndexChanged += delegate { UpdatePendingChanges(); };
+            _hidden.CheckedChanged += delegate { UpdatePendingChanges(); };
+
+            _pending.Dock = DockStyle.Fill;
+            _pending.AutoSize = true;
+            _pending.MinimumSize = new Size(0, Dpi.S(30));
+            _pending.Font = new Font(Font, FontStyle.Bold);
+            _pending.TextAlign = ContentAlignment.MiddleLeft;
+            _pending.BorderStyle = BorderStyle.FixedSingle;
+            _pending.Padding = new Padding(Dpi.S(4));
+            _pending.Margin = new Padding(0, 0, 0, Dpi.S(4));
+            detail.Controls.Add(_pending, 0, 3);
 
             _actionRow.Dock = DockStyle.Top;
             _actionRow.Margin = new Padding(0, Dpi.S(2), 0, 0);
             _actionRow.Resize += delegate { ArrangeActions(); };
-            detail.Controls.Add(_actionRow, 0, 3);
+            detail.Controls.Add(_actionRow, 0, 4);
             _hidden.Text = Ui.T("在系统电源选项中隐藏", "在系統電源選項中隱藏", "Hide in Power Options");
             _hidden.AutoSize = true;
             _hidden.Margin = Padding.Empty;
@@ -1476,7 +1493,37 @@ namespace PowerOptionEditor
                 BindEditor(_acList, _acBox, row, row.HasAc, row.Ac);
                 BindEditor(_dcList, _dcBox, row, row.HasDc, row.Dc);
             }
-            finally { _filling = false; }
+            finally { _filling = false; UpdatePendingChanges(); }
+        }
+
+        void UpdatePendingChanges()
+        {
+            if (_filling) return;
+            SettingRow row = SelectedRow();
+            uint ac, dc;
+            bool acChanged = row != null && !row.UnsupportedValue && row.HasAc
+                && (!TryReadEditor(_acList, _acBox, true, row.Ac, out ac) || ac != row.Ac);
+            bool dcChanged = row != null && !row.UnsupportedValue && row.HasDc
+                && (!TryReadEditor(_dcList, _dcBox, true, row.Dc, out dc) || dc != row.Dc);
+            bool hiddenChanged = row != null && _hidden.Enabled && _hidden.Checked != row.Hidden;
+            bool changed = acChanged || dcChanged || hiddenChanged;
+            _pending.Text = changed
+                ? Ui.T("已修改，尚未写入。请点击「写入数值」保存。", "已修改，尚未寫入。請點擊「寫入數值」儲存。", "Changes have not been written. Click Write values to save.")
+                : Ui.T("没有待写入的修改", "沒有待寫入的修改", "No pending changes");
+            _pending.BackColor = changed ? Color.FromArgb(255, 244, 214) : SystemColors.Control;
+            _pending.ForeColor = changed ? Color.FromArgb(112, 76, 20) : SystemColors.ControlText;
+            _acBox.BackColor = _acList.BackColor = acChanged ? Color.LightYellow : SystemColors.Window;
+            _dcBox.BackColor = _dcList.BackColor = dcChanged ? Color.LightYellow : SystemColors.Window;
+            _hidden.BackColor = hiddenChanged ? Color.LightYellow : SystemColors.Control;
+            _apply.Text = changed
+                ? Ui.T("写入数值（尚未写入）", "寫入數值（尚未寫入）", "Write values (pending)")
+                : Ui.T("写入数值", "寫入數值", "Write values");
+            _apply.UseVisualStyleBackColor = !changed;
+            _apply.BackColor = changed ? Color.FromArgb(246, 226, 180) : SystemColors.Control;
+            _apply.ForeColor = changed ? Color.FromArgb(112, 76, 20) : SystemColors.ControlText;
+            Text = (FixedCatalog.Modern ? Ui.Title : Ui.Title + Ui.T("（旧式电源方案，Windows Server 2003）", "（舊式電源配置，Windows Server 2003）", " (legacy power schemes, Windows Server 2003)"))
+                + (changed ? Ui.T(" — 尚未写入", " — 尚未寫入", " — Unsaved changes") : "");
+            ArrangeActions();
         }
 
         static void BindEditor(ComboBox list, TextBox box, SettingRow row, bool has, uint value)
@@ -1552,7 +1599,6 @@ namespace PowerOptionEditor
                 if (rc != Native.Ok)
                 {
                     Report(Ui.T("数值已写入，但隐藏属性失败：", "數值已寫入，但隱藏屬性失敗：", "Values were written, but changing the hidden flag failed: ") + Explain(rc));
-                    RefreshRow(row);
                     return;
                 }
             }

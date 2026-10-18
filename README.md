@@ -23,7 +23,7 @@
 C:\Windows\Microsoft.NET\Framework64\v4.0.30319\MSBuild.exe PowerOptionEditor.sln /t:Rebuild /p:Configuration=Release /p:Platform=x64
 ```
 
-输出位于 `bin\Release\` 或 `bin\Debug\`。部署时一起复制 `PowerOptionEditor.exe` 与 `PowerOptionEditor.exe.config`；PDB 仅用于调试。构建脚本使用自身目录定位工程，可以从其他工作目录调用。
+输出位于 `bin\Release\` 或 `bin\Debug\`。部署时只需复制 `PowerOptionEditor.exe`；PDB 仅用于调试，不需要额外的 `.exe.config` 文件。目标电脑仍需安装 .NET Framework 4.0 完整版或兼容的更新版本。构建脚本使用自身目录定位工程，可以从其他工作目录调用。
 
 ## 最低运行环境
 
