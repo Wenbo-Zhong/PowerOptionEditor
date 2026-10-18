@@ -1,7 +1,19 @@
-$csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-if (-not (Test-Path -LiteralPath $csc)) {
-    Write-Error ".NET Framework 4 compiler was not found: $csc"
-    exit 1
+param(
+    [ValidateSet('Debug', 'Release')]
+    [string]$Configuration = 'Release',
+    [string]$FrameworkPath
+)
+$ErrorActionPreference = 'Stop'
+$msbuild = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\MSBuild.exe'
+if (-not (Test-Path -LiteralPath $msbuild)) {
+    throw "Install .NET Framework 4 with MSBuild, or build PowerOptionEditor.sln using an MSBuild-compatible IDE. Missing: $msbuild"
 }
-& $csc /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 /win32manifest:app.manifest /r:System.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Xml.dll /out:PowerOptionEditor.exe Program.cs
+$buildArgs = @(
+    (Join-Path $PSScriptRoot 'PowerOptionEditor.sln'),
+    '/nologo', '/t:Rebuild',
+    "/p:Configuration=$Configuration", '/p:Platform=x64',
+    '/p:TreatWarningsAsErrors=true'
+)
+if ($FrameworkPath) { $buildArgs += "/p:FrameworkPathOverride=$FrameworkPath" }
+& $msbuild @buildArgs
 exit $LASTEXITCODE

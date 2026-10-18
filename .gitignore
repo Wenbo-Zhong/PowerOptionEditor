@@ -1,7 +1,15 @@
+bin/
 *.exe
 *.pdb
-boot-error.txt
 *-dump.txt
-.vs/
 .grok/
 .agents/
+obj/
+.vs/
+*.user
+*.suo
+PowerOptionEditor.exe
+PowerOptionEditor.pdb
+PowerOptionEditor.exe.config
+boot-error.txt
+power-settings-dump.txt
