@@ -25,48 +25,6 @@ using Microsoft.Win32;
 
 namespace PowerOptionEditor
 {
-    static class Ui
-    {
-        enum Kind { Hans, Hant, En }
-        static readonly Kind Current = Detect();
-
-        public static string Title
-        {
-            get { return T("电源选项编辑器", "電源選項編輯器", "Power Option Editor"); }
-        }
-
-        public static string T(string hans, string hant, string english)
-        {
-            if (Current == Kind.Hans) return hans;
-            if (Current == Kind.Hant) return hant;
-            return english;
-        }
-
-        static Kind Detect()
-        {
-            CultureInfo culture = CultureInfo.CurrentUICulture;
-            while (culture != null)
-            {
-                string name = culture.Name;
-                if (name.Equals("zh-Hans", StringComparison.OrdinalIgnoreCase)
-                    || name.Equals("zh-CHS", StringComparison.OrdinalIgnoreCase)
-                    || name.StartsWith("zh-CN", StringComparison.OrdinalIgnoreCase)
-                    || name.StartsWith("zh-SG", StringComparison.OrdinalIgnoreCase))
-                    return Kind.Hans;
-                if (name.Equals("zh-Hant", StringComparison.OrdinalIgnoreCase)
-                    || name.Equals("zh-CHT", StringComparison.OrdinalIgnoreCase)
-                    || name.StartsWith("zh-TW", StringComparison.OrdinalIgnoreCase)
-                    || name.StartsWith("zh-HK", StringComparison.OrdinalIgnoreCase)
-                    || name.StartsWith("zh-MO", StringComparison.OrdinalIgnoreCase))
-                    return Kind.Hant;
-                if (culture.Parent == null || culture.Parent == culture || culture.Parent.Name.Length == 0)
-                    break;
-                culture = culture.Parent;
-            }
-            return Kind.En;
-        }
-    }
-
     static class Program
     {
         [STAThread]
@@ -284,7 +242,7 @@ namespace PowerOptionEditor
         {
             StringBuilder sb = new StringBuilder(512);
             uint n = FormatMessage(0x1000 | 0x200, IntPtr.Zero, code, 0, sb, (uint)sb.Capacity, IntPtr.Zero);
-            if (n == 0) return Ui.T("错误代码 ", "錯誤碼 ", "Error ") + code.ToString(CultureInfo.InvariantCulture);
+            if (n == 0) return Ui.T("error") + code.ToString(CultureInfo.InvariantCulture);
             return sb.ToString().Trim();
         }
     }
@@ -354,9 +312,9 @@ namespace PowerOptionEditor
 
         string Format(bool has, uint value)
         {
-            if (!has) return Profile != Guid.Empty ? Ui.T("未覆盖", "未覆寫", "Not overridden") : "";
+            if (!has) return Profile != Guid.Empty ? Ui.T("not.overridden") : "";
             if (Profile != Guid.Empty && value == 0 && (Setting == new Guid("75b0ae3f-bce0-45a7-8c89-c9611c25e100") || Setting == new Guid("75b0ae3f-bce0-45a7-8c89-c9611c25e101")))
-                return Ui.T("不封顶", "無上限", "Unlimited");
+                return Ui.T("unlimited");
             for (int i = 0; i < Choices.Count; i++)
             {
                 if (Choices[i].Value == value)
@@ -364,7 +322,7 @@ namespace PowerOptionEditor
             }
             string number = value.ToString(CultureInfo.InvariantCulture);
             if (!string.IsNullOrEmpty(Units)) number = number + " " + Units;
-            if (Choices.Count > 0) return number + Ui.T("  (不在可选列表中)", "  (不在可選清單中)", "  (not in the choice list)");
+            if (Choices.Count > 0) return number + Ui.T("not.in.the.choice.list");
             return number;
         }
     }
@@ -379,7 +337,7 @@ namespace PowerOptionEditor
         public bool Active;
         public override string ToString()
         {
-            return Active ? Name + Ui.T("    （当前使用）", "    （目前使用）", "    (active)") : Name;
+            return Active ? Name + Ui.T("active") : Name;
         }
     }
 
@@ -527,7 +485,7 @@ namespace PowerOptionEditor
             for (int g = 0; g < groups.Count; g++)
             {
                 Guid group = groups[g];
-                string groupName = group == Guid.Empty ? Ui.T("（方案根设置）", "（配置根設定）", "(Plan root)") : ReadText(NativeReadKind.Friendly, null, group, null);
+                string groupName = group == Guid.Empty ? Ui.T("plan.root") : ReadText(NativeReadKind.Friendly, null, group, null);
                 if (string.IsNullOrEmpty(groupName)) groupName = group.ToString("B");
                 List<Guid> settings = EnumGuids(PtrOf(scheme), PtrOf(group == Guid.Empty ? (Guid?)null : group), Native.AccessSetting);
                 for (int s = 0; s < settings.Count; s++)
@@ -628,7 +586,7 @@ namespace PowerOptionEditor
                 }
                 finally { Marshal.FreeHGlobal(buf); }
             }
-            row.Description = (row.Description ?? "") + Ui.T(" 此设置的数值类型不是 DWORD，界面只显示说明，不写入。", " 此設定的數值類型不是 DWORD，介面只顯示說明，不寫入。", " This value is not a DWORD. It is shown but cannot be written here.");
+            row.Description = (row.Description ?? "") + Ui.T("this.value.is.not.a.dword.it.is.shown.but.cannot.be.written.here");
             return true;
         }
 
@@ -815,7 +773,7 @@ namespace PowerOptionEditor
                 item.Legacy = true;
                 item.LegacyIndex = index;
                 item.Name = Marshal.PtrToStringUni(name);
-                if (string.IsNullOrEmpty(item.Name)) item.Name = Ui.T("方案 ", "配置 ", "Scheme ") + index.ToString(CultureInfo.InvariantCulture);
+                if (string.IsNullOrEmpty(item.Name)) item.Name = Ui.T("scheme") + index.ToString(CultureInfo.InvariantCulture);
                 item.Description = Marshal.PtrToStringUni(description) ?? "";
                 item.Active = hasActive && index == active;
                 list.Add(item);
@@ -847,22 +805,22 @@ namespace PowerOptionEditor
             try
             {
                 PowerPolicy policy = (PowerPolicy)Marshal.PtrToStructure(mem, typeof(PowerPolicy));
-                AddTimeout(rows, 1, Ui.T("空闲超时（秒）", "閒置逾時（秒）", "Idle timeout (seconds)"), Ui.T("系统空闲多久后执行空闲操作。", "系統閒置多久後執行閒置操作。", "How long the system stays idle before the idle action."), policy.User.IdleTimeoutAc, policy.User.IdleTimeoutDc);
-                AddAction(rows, 2, Ui.T("空闲操作", "閒置操作", "Idle action"), Ui.T("空闲定时器到期后执行的操作。", "閒置計時器到期後執行的操作。", "Action when the idle timer expires."), policy.User.IdleAc.Action, policy.User.IdleDc.Action);
-                AddByte(rows, 3, Ui.T("空闲灵敏度（%）", "閒置靈敏度（%）", "Idle sensitivity (%)"), Ui.T("判定系统空闲的活动阈值。", "判定系統閒置的活動閾值。", "Activity level that counts as idle."), policy.User.IdleSensitivityAc, policy.User.IdleSensitivityDc);
-                AddByte(rows, 4, Ui.T("处理器节流策略", "處理器節流策略", "Processor throttle policy"), Ui.T("处理器动态节流策略。", "處理器動態節流策略。", "Dynamic processor throttling policy."), policy.User.ThrottlePolicyAc, policy.User.ThrottlePolicyDc);
-                AddSleepState(rows, 5, Ui.T("最大睡眠状态", "最大睡眠狀態", "Maximum sleep state"), Ui.T("允许进入的最深睡眠状态。", "允許進入的最深睡眠狀態。", "Deepest sleep state allowed."), policy.User.MaxSleepAc, policy.User.MaxSleepDc);
-                AddTimeout(rows, 6, Ui.T("显示器关闭（秒）", "顯示器關閉（秒）", "Turn off display (seconds)"), Ui.T("关闭显示器前的等待时间。0 表示从不。", "關閉顯示器前的等待時間。0 表示永不。", "Delay before turning off the display. 0 means never."), policy.User.VideoTimeoutAc, policy.User.VideoTimeoutDc);
-                AddTimeout(rows, 7, Ui.T("硬盘关闭（秒）", "硬碟關閉（秒）", "Turn off hard disk (seconds)"), Ui.T("关闭硬盘前的等待时间。0 表示从不。", "關閉硬碟前的等待時間。0 表示永不。", "Delay before turning off hard disks. 0 means never."), policy.User.SpindownTimeoutAc, policy.User.SpindownTimeoutDc);
-                AddByte(rows, 8, Ui.T("风扇优先满速", "風扇優先滿速", "Favor fan and full speed"), Ui.T("被动散热时是否偏向风扇和处理器满速。0 或 1。", "被動散熱時是否偏向風扇和處理器滿速。0 或 1。", "Whether passive cooling favors the fan and full processor speed. 0 or 1."), policy.User.OptimizeForPowerAc, policy.User.OptimizeForPowerDc);
-                AddByte(rows, 9, Ui.T("风扇前最低节流（%）", "風扇前最低節流（%）", "Throttle before fan (%)"), Ui.T("打开风扇前允许的最低处理器节流。", "開啟風扇前允許的最低處理器節流。", "Lowest processor throttle before the fans turn on."), policy.User.FanThrottleToleranceAc, policy.User.FanThrottleToleranceDc);
-                AddByte(rows, 10, Ui.T("强制处理器节流（%）", "強制處理器節流（%）", "Forced processor throttle (%)"), Ui.T("系统强制的处理器节流级别。", "系統強制的處理器節流級別。", "Processor throttle imposed by the system."), policy.User.ForcedThrottleAc, policy.User.ForcedThrottleDc);
-                AddAction(rows, 11, Ui.T("电源按钮", "電源按鈕", "Power button"), Ui.T("按下电源按钮时的操作。", "按下電源按鈕時的操作。", "Action when the power button is pressed."), policy.Machine.PowerButtonAc.Action, policy.Machine.PowerButtonDc.Action);
-                AddAction(rows, 12, Ui.T("睡眠按钮", "睡眠按鈕", "Sleep button"), Ui.T("按下睡眠按钮时的操作。", "按下睡眠按鈕時的操作。", "Action when the sleep button is pressed."), policy.Machine.SleepButtonAc.Action, policy.Machine.SleepButtonDc.Action);
-                AddAction(rows, 13, Ui.T("合上盖子", "闔上蓋子", "Lid close"), Ui.T("合上笔记本电脑盖子时的操作。", "闔上筆記型電腦蓋子時的操作。", "Action when the lid is closed."), policy.Machine.LidCloseAc.Action, policy.Machine.LidCloseDc.Action);
-                AddSleepState(rows, 14, Ui.T("最小睡眠状态", "最小睡眠狀態", "Minimum sleep state"), Ui.T("空闲时允许的最浅睡眠状态。", "閒置時允許的最淺睡眠狀態。", "Shallowest sleep state used when idle."), policy.Machine.MinSleepAc, policy.Machine.MinSleepDc);
-                AddTimeout(rows, 15, Ui.T("打盹超时（秒）", "打盹逾時（秒）", "Doze timeout (seconds)"), Ui.T("进入打盹状态前的等待时间。", "進入打盹狀態前的等待時間。", "Delay before dozing."), policy.Machine.DozeTimeoutAc, policy.Machine.DozeTimeoutDc);
-                AddTimeout(rows, 16, Ui.T("休眠超时（秒）", "休眠逾時（秒）", "Hibernate timeout (seconds)"), Ui.T("进入休眠前的等待时间。", "進入休眠前的等待時間。", "Delay before hibernation."), policy.Machine.DozeS4TimeoutAc, policy.Machine.DozeS4TimeoutDc);
+                AddTimeout(rows, 1, Ui.T("idle.timeout.seconds"), Ui.T("how.long.the.system.stays.idle.before.the.idle.action"), policy.User.IdleTimeoutAc, policy.User.IdleTimeoutDc);
+                AddAction(rows, 2, Ui.T("idle.action"), Ui.T("action.when.the.idle.timer.expires"), policy.User.IdleAc.Action, policy.User.IdleDc.Action);
+                AddByte(rows, 3, Ui.T("idle.sensitivity"), Ui.T("activity.level.that.counts.as.idle"), policy.User.IdleSensitivityAc, policy.User.IdleSensitivityDc);
+                AddByte(rows, 4, Ui.T("processor.throttle.policy"), Ui.T("dynamic.processor.throttling.policy"), policy.User.ThrottlePolicyAc, policy.User.ThrottlePolicyDc);
+                AddSleepState(rows, 5, Ui.T("maximum.sleep.state"), Ui.T("deepest.sleep.state.allowed"), policy.User.MaxSleepAc, policy.User.MaxSleepDc);
+                AddTimeout(rows, 6, Ui.T("turn.off.display.seconds"), Ui.T("delay.before.turning.off.the.display.0.means.never"), policy.User.VideoTimeoutAc, policy.User.VideoTimeoutDc);
+                AddTimeout(rows, 7, Ui.T("turn.off.hard.disk.seconds"), Ui.T("delay.before.turning.off.hard.disks.0.means.never"), policy.User.SpindownTimeoutAc, policy.User.SpindownTimeoutDc);
+                AddByte(rows, 8, Ui.T("favor.fan.and.full.speed"), Ui.T("whether.passive.cooling.favors.the.fan.and.full.processor.speed.0.or.1"), policy.User.OptimizeForPowerAc, policy.User.OptimizeForPowerDc);
+                AddByte(rows, 9, Ui.T("throttle.before.fan"), Ui.T("lowest.processor.throttle.before.the.fans.turn.on"), policy.User.FanThrottleToleranceAc, policy.User.FanThrottleToleranceDc);
+                AddByte(rows, 10, Ui.T("forced.processor.throttle"), Ui.T("processor.throttle.imposed.by.the.system"), policy.User.ForcedThrottleAc, policy.User.ForcedThrottleDc);
+                AddAction(rows, 11, Ui.T("power.button"), Ui.T("action.when.the.power.button.is.pressed"), policy.Machine.PowerButtonAc.Action, policy.Machine.PowerButtonDc.Action);
+                AddAction(rows, 12, Ui.T("sleep.button"), Ui.T("action.when.the.sleep.button.is.pressed"), policy.Machine.SleepButtonAc.Action, policy.Machine.SleepButtonDc.Action);
+                AddAction(rows, 13, Ui.T("lid.close"), Ui.T("action.when.the.lid.is.closed"), policy.Machine.LidCloseAc.Action, policy.Machine.LidCloseDc.Action);
+                AddSleepState(rows, 14, Ui.T("minimum.sleep.state"), Ui.T("shallowest.sleep.state.used.when.idle"), policy.Machine.MinSleepAc, policy.Machine.MinSleepDc);
+                AddTimeout(rows, 15, Ui.T("doze.timeout.seconds"), Ui.T("delay.before.dozing"), policy.Machine.DozeTimeoutAc, policy.Machine.DozeTimeoutDc);
+                AddTimeout(rows, 16, Ui.T("hibernate.timeout.seconds"), Ui.T("delay.before.hibernation"), policy.Machine.DozeS4TimeoutAc, policy.Machine.DozeS4TimeoutDc);
             }
             finally { Marshal.FreeHGlobal(mem); }
             return rows;
@@ -874,7 +832,7 @@ namespace PowerOptionEditor
             row.HasAc = row.HasDc = true;
             row.Ac = ac;
             row.Dc = dc;
-            row.Units = Ui.T("秒", "秒", "seconds");
+            row.Units = Ui.T("seconds");
             row.HasRange = true;
             row.Min = 0;
             row.Max = 999999;
@@ -902,14 +860,14 @@ namespace PowerOptionEditor
             row.Ac = (uint)ac;
             row.Dc = (uint)dc;
             string[] names = new string[] {
-                Ui.T("无操作", "無操作", "None"),
-                Ui.T("保留", "保留", "Reserved"),
-                Ui.T("睡眠", "睡眠", "Sleep"),
-                Ui.T("休眠", "休眠", "Hibernate"),
-                Ui.T("关机", "關機", "Shut down"),
-                Ui.T("关机并重新启动", "關機並重新啟動", "Shut down and restart"),
-                Ui.T("关机并断电", "關機並斷電", "Shut down and power off"),
-                Ui.T("弹出", "退出", "Eject")
+                Ui.T("none"),
+                Ui.T("reserved"),
+                Ui.T("sleep"),
+                Ui.T("hibernate"),
+                Ui.T("shut.down"),
+                Ui.T("shut.down.and.restart"),
+                Ui.T("shut.down.and.power.off"),
+                Ui.T("eject")
             };
             for (uint i = 0; i < names.Length; i++)
             {
@@ -928,12 +886,12 @@ namespace PowerOptionEditor
             row.Ac = (uint)ac;
             row.Dc = (uint)dc;
             string[] names = new string[] {
-                Ui.T("未指定", "未指定", "Unspecified"),
-                Ui.T("工作", "工作", "Working"),
+                Ui.T("unspecified"),
+                Ui.T("working"),
                 "S1", "S2",
-                Ui.T("S3 睡眠", "S3 睡眠", "S3 sleep"),
-                Ui.T("S4 休眠", "S4 休眠", "S4 hibernate"),
-                Ui.T("关机", "關機", "Shut down")
+                Ui.T("s3.sleep"),
+                Ui.T("s4.hibernate"),
+                Ui.T("shut.down")
             };
             for (uint i = 0; i < names.Length; i++)
             {
@@ -950,9 +908,9 @@ namespace PowerOptionEditor
             SettingRow row = new SettingRow();
             row.Legacy = true;
             row.LegacyField = field;
-            row.GroupName = Ui.T("旧式电源方案", "舊式電源配置", "Legacy power scheme");
+            row.GroupName = Ui.T("legacy.power.scheme");
             row.Name = name;
-            row.Description = description + Ui.T(" 这些项目来自 Windows Server 2003 时代的电源方案结构。", " 這些項目來自 Windows Server 2003 時代的電源配置結構。", " These fields come from the Windows Server 2003 power scheme.");
+            row.Description = description + Ui.T("these.fields.come.from.the.windows.server.2003.power.scheme");
             return row;
         }
 
@@ -1068,8 +1026,8 @@ namespace PowerOptionEditor
             _bar.Margin = new Padding(0, 0, 0, Dpi.S(6));
             root.Controls.Add(_bar, 0, 0);
 
-            _mode.TabPages.Add(Ui.T("日常", "日常", "Daily"));
-            _mode.TabPages.Add(Ui.T("场景", "場景", "Scenarios"));
+            _mode.TabPages.Add(Ui.T("daily"));
+            _mode.TabPages.Add(Ui.T("scenarios"));
             _mode.Dock = DockStyle.Fill;
             Controls.Add(_mode);
             _mode.TabPages[0].Controls.Add(root);
@@ -1090,7 +1048,7 @@ namespace PowerOptionEditor
             AddBar(_profiles);
             // Scheme overrides are listed together in the scenario grid.
             // Keep this selector internal so the toolbar only needs the scenario menu.
-            Label planCaption = MakeLabel(Ui.T("电源方案", "電源配置", "Power plan"));
+            Label planCaption = MakeLabel(Ui.T("power.plan"));
             AddBar(planCaption);
             _dailyControls.Add(planCaption);
             _dailyControls.Add(_schemes);
@@ -1099,27 +1057,27 @@ namespace PowerOptionEditor
             _schemes.SelectedIndexChanged += delegate { ReloadSettings(); };
             AddBar(_schemes);
 
-            Button activate = MakeButton(Ui.T("设为当前", "設為目前", "Set active"));
+            Button activate = MakeButton(Ui.T("set.active"));
             activate.Click += delegate { OnActivate(); };
             AddBar(activate);
 
-            Button refresh = MakeButton(Ui.T("刷新", "重新整理", "Refresh"));
+            Button refresh = MakeButton(Ui.T("refresh"));
             refresh.Click += delegate { ReloadSchemes(true); if (SceneMode) ReloadProfiles(); };
             AddBar(refresh);
 
-            AddBar(MakeLabel(Ui.T("搜索", "搜尋", "Search")));
+            AddBar(MakeLabel(Ui.T("search")));
             _search.Width = Dpi.S(180);
             _search.TextChanged += delegate { BindGrid(); };
             AddBar(_search);
 
-            Button export = MakeButton(Ui.T("导出", "匯出", "Export"));
+            Button export = MakeButton(Ui.T("export"));
             export.Click += delegate { OnExport(); };
             AddBar(export);
 
-            Button import = MakeButton(Ui.T("导入", "匯入", "Import"));
+            Button import = MakeButton(Ui.T("import"));
             import.Click += delegate { OnImport(); };
             AddBar(import);
-            Button unhideAll = MakeButton(Ui.T("取消隐藏所有隐藏选项", "取消隱藏所有隱藏選項", "Unhide all hidden options"));
+            Button unhideAll = MakeButton(Ui.T("unhide.all.hidden.options"));
             unhideAll.Click += delegate { OnUnhideAll(); };
             unhideAll.Enabled = Native.ModernAvailable();
             AddBar(unhideAll);
@@ -1130,7 +1088,7 @@ namespace PowerOptionEditor
             _dailyControls.Add(_hidden);
             _dailyControls.Add(_defaults);
 
-            Button cpl = MakeButton(Ui.T("系统电源选项", "系統電源選項", "Power Options"));
+            Button cpl = MakeButton(Ui.T("power.options"));
             cpl.Click += delegate
             {
                 try { Process.Start("control.exe", "powercfg.cpl"); }
@@ -1138,7 +1096,7 @@ namespace PowerOptionEditor
             };
             AddBar(cpl);
 
-            Button admin = MakeButton(Ui.T("以管理员重启", "以系統管理員重新啟動", "Restart as administrator"));
+            Button admin = MakeButton(Ui.T("restart.as.administrator"));
             admin.Click += delegate { RelaunchAdmin(); };
             AddBar(admin);
             ArrangeBar();
@@ -1153,14 +1111,14 @@ namespace PowerOptionEditor
             ImageList spacer = new ImageList();
             spacer.ImageSize = new Size(1, Math.Max(Dpi.S(20), Font.Height + Dpi.S(6)));
             _grid.SmallImageList = spacer;
-            AddColumn(Ui.T("分组", "群組", "Group"));
-            AddColumn(Ui.T("设置", "設定", "Setting"));
-            AddColumn(Ui.T("交流电", "交流電", "AC"));
-            AddColumn(Ui.T("电池", "電池", "Battery"));
-            AddColumn(Ui.T("默认交流", "預設交流", "Default AC"));
-            AddColumn(Ui.T("默认电池", "預設電池", "Default battery"));
-            AddColumn(Ui.T("隐藏", "隱藏", "Hidden"));
-            AddColumn(Ui.T("单位", "單位", "Units"));
+            AddColumn(Ui.T("group"));
+            AddColumn(Ui.T("setting"));
+            AddColumn(Ui.T("ac"));
+            AddColumn(Ui.T("battery"));
+            AddColumn(Ui.T("default.ac"));
+            AddColumn(Ui.T("default.battery"));
+            AddColumn(Ui.T("hidden"));
+            AddColumn(Ui.T("units"));
             _grid.SelectedIndexChanged += delegate { ShowSelected(); };
             _grid.DoubleClick += delegate { OpenRegistry(); };
             root.Controls.Add(_grid, 0, 1);
@@ -1194,8 +1152,8 @@ namespace PowerOptionEditor
             _editorRow.Margin = new Padding(0, Dpi.S(2), 0, Dpi.S(4));
             _editorRow.Resize += delegate { ArrangeEditors(); };
             detail.Controls.Add(_editorRow, 0, 2);
-            _acCaption = MakeLabel(Ui.T("交流电", "交流電", "AC"));
-            _dcCaption = MakeLabel(Ui.T("电池", "電池", "Battery"));
+            _acCaption = MakeLabel(Ui.T("ac"));
+            _dcCaption = MakeLabel(Ui.T("battery"));
             _acCaption.AutoSize = false;
             _dcCaption.AutoSize = false;
             _acCaption.TextAlign = ContentAlignment.MiddleRight;
@@ -1228,20 +1186,20 @@ namespace PowerOptionEditor
             _actionRow.Margin = new Padding(0, Dpi.S(2), 0, 0);
             _actionRow.Resize += delegate { ArrangeActions(); };
             detail.Controls.Add(_actionRow, 0, 4);
-            _hidden.Text = Ui.T("在系统电源选项中隐藏", "在系統電源選項中隱藏", "Hide in Power Options");
+            _hidden.Text = Ui.T("hide.in.power.options");
             _hidden.AutoSize = true;
             _hidden.Margin = Padding.Empty;
-            _apply.Text = Ui.T("写入数值", "寫入數值", "Write values");
+            _apply.Text = Ui.T("write.values");
             _apply.AutoSize = true;
             _apply.Margin = Padding.Empty;
             _apply.Click += delegate { OnApply(false); };
-            _defaults.Text = Ui.T("恢复默认", "還原預設", "Restore defaults");
+            _defaults.Text = Ui.T("restore.defaults");
             _defaults.AutoSize = true;
             _defaults.Margin = Padding.Empty;
             _defaults.Click += delegate { OnApply(true); };
-            Button copy = MakeButton(Ui.T("复制 GUID", "複製 GUID", "Copy GUID"));
+            Button copy = MakeButton(Ui.T("copy.guid"));
             copy.Click += delegate { CopyGuid(); };
-            Button reg = MakeButton(Ui.T("打开注册表", "開啟登錄編輯器", "Open Registry"));
+            Button reg = MakeButton(Ui.T("open.registry"));
             reg.Click += delegate { OpenRegistry(); };
             _actionRow.Controls.Add(_hidden);
             _actionRow.Controls.Add(_apply);
@@ -1437,10 +1395,10 @@ namespace PowerOptionEditor
             }
             _filling = false;
             if (_schemes.Items.Count > 0) _schemes.SelectedIndex = index;
-            else Report(Ui.T("没有读到电源方案。", "沒有讀到電源配置。", "No power plans were found."));
+            else Report(Ui.T("no.power.plans.were.found"));
             Text = FixedCatalog.Modern
                 ? Ui.Title
-                : Ui.Title + Ui.T("（旧式电源方案，Windows Server 2003）", "（舊式電源配置，Windows Server 2003）", " (legacy power schemes, Windows Server 2003)");
+                : Ui.Title + Ui.T("legacy.power.schemes.windows.server.2003");
         }
 
         void ReloadProfiles()
@@ -1522,8 +1480,8 @@ namespace PowerOptionEditor
                     }
                 }
                 BindGrid();
-                Report(Ui.T("已加载 ", "已載入 ", "Loaded ") + _rows.Count.ToString(CultureInfo.InvariantCulture) + Ui.T(" 项。", " 項。", " settings.")
-                    + (FixedCatalog.Modern ? "" : Ui.T(" 当前系统没有 Vista 之后的电源接口，正在使用旧式电源方案。", " 目前系統沒有 Vista 之後的電源介面，正在使用舊式電源配置。", " This system has no power interface from Vista onward, so legacy schemes are used.")));
+                Report(Ui.T("loaded") + _rows.Count.ToString(CultureInfo.InvariantCulture) + Ui.T("settings")
+                    + (FixedCatalog.Modern ? "" : Ui.T("this.system.has.no.power.interface.from.vista.onward.so.legacy.schemes")));
             }
             catch (Exception ex) { Report(ex.Message); }
             finally { UseWaitCursor = false; }
@@ -1562,7 +1520,7 @@ namespace PowerOptionEditor
                 item.SubItems.Add(row.DcText);
                 item.SubItems.Add(row.AcDefaultText);
                 item.SubItems.Add(row.DcDefaultText);
-                item.SubItems.Add(row.AttributesKnown ? (row.Hidden ? Ui.T("是", "是", "Yes") : Ui.T("否", "否", "No")) : "");
+                item.SubItems.Add(row.AttributesKnown ? (row.Hidden ? Ui.T("yes") : Ui.T("no")) : "");
                 item.SubItems.Add(row.Units ?? "");
                 item.ToolTipText = row.Description ?? "";
                 item.Tag = row;
@@ -1602,7 +1560,7 @@ namespace PowerOptionEditor
                 _apply.Enabled = has && !row.UnsupportedValue && (row.HasAc || row.HasDc);
                 _defaults.Enabled = has && !row.Legacy && (row.HasAcDefault || row.HasDcDefault);
                 _hidden.Enabled = has && row.AttributesKnown && !row.Legacy && row.Profile == Guid.Empty;
-                _description.Text = has ? (row.Description ?? "") + (row.Profile != Guid.Empty ? Ui.T("\r\n场景覆盖值；未覆盖时使用日常值。保存后下次进入该场景时生效。", "\r\n場景覆寫值；未覆寫時使用日常值。儲存後下次進入該場景時生效。", "\r\nScenario override; missing values use daily settings. Changes take effect on the next scenario entry.") : "") : "";
+                _description.Text = has ? (row.Description ?? "") + (row.Profile != Guid.Empty ? Ui.T("scenario.override.missing.values.use.daily.settings.changes.take.effec") : "") : "";
                 if (!has)
                 {
                     _meta.Text = "";
@@ -1615,22 +1573,22 @@ namespace PowerOptionEditor
                 }
                 _hidden.Checked = row.Hidden;
                 StringBuilder meta = new StringBuilder();
-                if (row.Legacy) meta.Append(Ui.T("旧式字段", "舊式欄位", "Legacy field"));
+                if (row.Legacy) meta.Append(Ui.T("legacy.field"));
                 else meta.Append(row.Setting.ToString("B"));
                 if (row.HasRange)
                 {
-                    meta.Append(Ui.T("    范围 ", "    範圍 ", "    Range "));
+                    meta.Append(Ui.T("range"));
                     meta.Append(row.Min.ToString(CultureInfo.InvariantCulture));
                     meta.Append(" – ");
                     meta.Append(row.Max.ToString(CultureInfo.InvariantCulture));
                     if (row.Increment > 1)
                     {
-                        meta.Append(Ui.T("    步进 ", "    步進 ", "    Increment "));
+                        meta.Append(Ui.T("increment"));
                         meta.Append(row.Increment.ToString(CultureInfo.InvariantCulture));
                     }
                 }
                 if (row.Choices.Count == 0 && (row.HasAc || row.HasDc))
-                    meta.Append(Ui.T("    没有预定义可选值，按原始数值编辑", "    沒有預先定義的可選值，請直接編輯原始數值", "    No predefined choices. Edit the raw value."));
+                    meta.Append(Ui.T("no.predefined.choices.edit.the.raw.value"));
                 _meta.Text = meta.ToString();
                 BindEditor(_acList, _acBox, row, row.HasAc, row.Ac);
                 BindEditor(_dcList, _dcBox, row, row.HasDc, row.Dc);
@@ -1650,21 +1608,21 @@ namespace PowerOptionEditor
             bool hiddenChanged = row != null && _hidden.Enabled && _hidden.Checked != row.Hidden;
             bool changed = acChanged || dcChanged || hiddenChanged;
             _pending.Text = changed
-                ? Ui.T("已修改，尚未写入。请点击「写入数值」保存。", "已修改，尚未寫入。請點擊「寫入數值」儲存。", "Changes have not been written. Click Write values to save.")
-                : Ui.T("没有待写入的修改", "沒有待寫入的修改", "No pending changes");
+                ? Ui.T("changes.have.not.been.written.click.write.values.to.save")
+                : Ui.T("no.pending.changes");
             _pending.BackColor = changed ? Color.FromArgb(255, 244, 214) : SystemColors.Control;
             _pending.ForeColor = changed ? Color.FromArgb(112, 76, 20) : SystemColors.ControlText;
             _acBox.BackColor = _acList.BackColor = acChanged ? Color.LightYellow : SystemColors.Window;
             _dcBox.BackColor = _dcList.BackColor = dcChanged ? Color.LightYellow : SystemColors.Window;
             _hidden.BackColor = hiddenChanged ? Color.LightYellow : SystemColors.Control;
             _apply.Text = changed
-                ? Ui.T("写入数值（尚未写入）", "寫入數值（尚未寫入）", "Write values (pending)")
-                : Ui.T("写入数值", "寫入數值", "Write values");
+                ? Ui.T("write.values.pending")
+                : Ui.T("write.values");
             _apply.UseVisualStyleBackColor = !changed;
             _apply.BackColor = changed ? Color.FromArgb(246, 226, 180) : SystemColors.Control;
             _apply.ForeColor = changed ? Color.FromArgb(112, 76, 20) : SystemColors.ControlText;
-            Text = (FixedCatalog.Modern ? Ui.Title : Ui.Title + Ui.T("（旧式电源方案，Windows Server 2003）", "（舊式電源配置，Windows Server 2003）", " (legacy power schemes, Windows Server 2003)"))
-                + (changed ? Ui.T(" — 尚未写入", " — 尚未寫入", " — Unsaved changes") : "");
+            Text = (FixedCatalog.Modern ? Ui.Title : Ui.Title + Ui.T("legacy.power.schemes.windows.server.2003"))
+                + (changed ? Ui.T("unsaved.changes") : "");
             ArrangeActions();
         }
 
@@ -1675,7 +1633,7 @@ namespace PowerOptionEditor
             {
                 list.Visible = false;
                 box.Visible = true;
-                box.Text = row.Profile != Guid.Empty && !has ? Ui.T("未覆盖", "未覆寫", "Not overridden") : "";
+                box.Text = row.Profile != Guid.Empty && !has ? Ui.T("not.overridden") : "";
                 box.Enabled = false;
                 return;
             }
@@ -1694,7 +1652,7 @@ namespace PowerOptionEditor
                 {
                     ValueChoice extra = new ValueChoice();
                     extra.Value = value;
-                    extra.Name = Ui.T("当前未列出的值", "目前未列出的值", "Current unlisted value");
+                    extra.Name = Ui.T("current.unlisted.value");
                     list.Items.Insert(0, extra);
                     select = 0;
                 }
@@ -1728,8 +1686,8 @@ namespace PowerOptionEditor
                     else { failed++; if (firstError == Native.Ok) firstError = rc; }
                 }
                 ReloadSettings();
-                Report(Ui.T("已取消隐藏 ", "已取消隱藏 ", "Unhidden: ") + changed.ToString(CultureInfo.InvariantCulture)
-                    + Ui.T(" 项；失败 ", " 項；失敗 ", "; failed: ") + failed.ToString(CultureInfo.InvariantCulture)
+                Report(Ui.T("unhidden") + changed.ToString(CultureInfo.InvariantCulture)
+                    + Ui.T("failed") + failed.ToString(CultureInfo.InvariantCulture)
                     + (failed > 0 ? ". " + Explain(firstError) : ""));
             }
             catch (Exception ex) { Report(ex.Message); }
@@ -1752,14 +1710,14 @@ namespace PowerOptionEditor
             }
             else if (!TryReadEditor(_acList, _acBox, row.HasAc, row.Ac, out ac) || !TryReadEditor(_dcList, _dcBox, row.HasDc, row.Dc, out dc))
             {
-                Report(Ui.T("请输入 0 到 4294967295 之间的整数。", "請輸入 0 到 4294967295 之間的整數。", "Enter an integer from 0 to 4294967295."));
+                Report(Ui.T("enter.an.integer.from.0.to.4294967295"));
                 return;
             }
             if (row.Profile != Guid.Empty && row.HasRange &&
                 ((row.HasAc && (ac < row.Min || ac > row.Max || (row.Increment > 1 && (ac - row.Min) % row.Increment != 0))) ||
                  (row.HasDc && (dc < row.Min || dc > row.Max || (row.Increment > 1 && (dc - row.Min) % row.Increment != 0)))))
             {
-                Report(Ui.T("数值超出范围或不符合步进。", "數值超出範圍或不符合步進。", "Value is outside the range or does not match the increment."));
+                Report(Ui.T("value.is.outside.the.range.or.does.not.match.the.increment"));
                 return;
             }
             uint rc = Native.Ok;
@@ -1775,7 +1733,7 @@ namespace PowerOptionEditor
                 rc = FixedCatalog.WriteHidden(row, _hidden.Checked);
                 if (rc != Native.Ok)
                 {
-                    Report(Ui.T("数值已写入，但隐藏属性失败：", "數值已寫入，但隱藏屬性失敗：", "Values were written, but changing the hidden flag failed: ") + Explain(rc));
+                    Report(Ui.T("values.were.written.but.changing.the.hidden.flag.failed") + Explain(rc));
                     return;
                 }
             }
@@ -1783,7 +1741,7 @@ namespace PowerOptionEditor
             row.Dc = dc;
             row.HasAc = row.HasAc || useDefault;
             RefreshRow(row);
-            Report(Ui.T("已写入“", "已寫入「", "Wrote \"") + row.Name + Ui.T("”。", "」。", "\".") + (row.Profile != Guid.Empty ? Ui.T(" 下次进入该场景时生效。", " 下次進入該場景時生效。", " Takes effect the next time this scenario is entered.") : ""));
+            Report(Ui.T("wrote") + row.Name + Ui.T("text") + (row.Profile != Guid.Empty ? Ui.T("takes.effect.the.next.time.this.scenario.is.entered") : ""));
         }
 
         static bool TryReadEditor(ComboBox list, TextBox box, bool has, uint current, out uint value)
@@ -1810,7 +1768,7 @@ namespace PowerOptionEditor
                 item.SubItems[3].Text = row.DcText;
                 item.SubItems[4].Text = row.AcDefaultText;
                 item.SubItems[5].Text = row.DcDefaultText;
-                item.SubItems[6].Text = row.AttributesKnown ? (row.Hidden ? Ui.T("是", "是", "Yes") : Ui.T("否", "否", "No")) : "";
+                item.SubItems[6].Text = row.AttributesKnown ? (row.Hidden ? Ui.T("yes") : Ui.T("no")) : "";
                 item.SubItems[7].Text = row.Units ?? "";
                 break;
             }
@@ -1823,7 +1781,7 @@ namespace PowerOptionEditor
             if (scheme == null) return;
             uint rc = FixedCatalog.Activate(scheme);
             if (rc != Native.Ok) { Report(Explain(rc)); return; }
-            Report(Ui.T("已切换当前电源方案。", "已切換目前電源配置。", "The active power plan was changed."));
+            Report(Ui.T("the.active.power.plan.was.changed"));
             ReloadSchemes(true);
         }
 
@@ -1831,17 +1789,17 @@ namespace PowerOptionEditor
         {
             if (!FixedCatalog.Modern)
             {
-                Report(Ui.T("旧式电源方案不能导出这种文件。", "舊式電源配置不能匯出這種檔案。", "Legacy power schemes cannot be exported in this format."));
+                Report(Ui.T("legacy.power.schemes.cannot.be.exported.in.this.format"));
                 return;
             }
             SaveFileDialog dialog = new SaveFileDialog();
-            dialog.Filter = Ui.T("电源备份 (*.xml)|*.xml", "電源備份 (*.xml)|*.xml", "Power backup (*.xml)|*.xml");
+            dialog.Filter = Ui.T("power.backup.xml.xml");
             dialog.FileName = "PowerBackup.xml";
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             try
             {
                 int count = PlanFile.Export(dialog.FileName, _rows);
-                Report(Ui.T("已导出 ", "已匯出 ", "Exported ") + count.ToString(CultureInfo.InvariantCulture) + Ui.T(" 项。", " 項。", " settings."));
+                Report(Ui.T("exported") + count.ToString(CultureInfo.InvariantCulture) + Ui.T("settings"));
             }
             catch (Exception ex) { Report(ex.Message); }
         }
@@ -1850,11 +1808,11 @@ namespace PowerOptionEditor
         {
             if (!FixedCatalog.Modern)
             {
-                Report(Ui.T("旧式电源方案不能导入这种文件。", "舊式電源配置不能匯入這種檔案。", "Legacy power schemes cannot be imported from this format."));
+                Report(Ui.T("legacy.power.schemes.cannot.be.imported.from.this.format"));
                 return;
             }
             OpenFileDialog dialog = new OpenFileDialog();
-            dialog.Filter = Ui.T("电源备份 (*.xml)|*.xml", "電源備份 (*.xml)|*.xml", "Power backup (*.xml)|*.xml");
+            dialog.Filter = Ui.T("power.backup.xml.xml");
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             try
             {
@@ -1864,13 +1822,13 @@ namespace PowerOptionEditor
                 int failed = PlanFile.Import(dialog.FileName, out written, out skipped, out error);
                 ReloadSettings();
                 if (error != Native.Ok)
-                    Report(Ui.T("导入中断：", "匯入中斷：", "Import stopped: ") + Explain(error));
+                    Report(Ui.T("import.stopped") + Explain(error));
                 else
-                    Report(Ui.T("已导入。写入 ", "已匯入。寫入 ", "Imported. Wrote ")
+                    Report(Ui.T("imported.wrote")
                         + written.ToString(CultureInfo.InvariantCulture)
-                        + Ui.T("，跳过 ", "，略過 ", ", skipped ")
+                        + Ui.T("skipped")
                         + skipped.ToString(CultureInfo.InvariantCulture)
-                        + Ui.T("，失败 ", "，失敗 ", ", failed ")
+                        + Ui.T("failed.08926bbc")
                         + failed.ToString(CultureInfo.InvariantCulture) + ".");
             }
             catch (Exception ex) { Report(ex.Message); }
@@ -1883,7 +1841,7 @@ namespace PowerOptionEditor
             try
             {
                 Clipboard.SetText(row.Setting.ToString("B"));
-                Report(Ui.T("已复制设置 GUID。", "已複製設定 GUID。", "Copied the setting GUID."));
+                Report(Ui.T("copied.the.setting.guid"));
             }
             catch (Exception ex) { Report(ex.Message); }
         }
@@ -1899,7 +1857,7 @@ namespace PowerOptionEditor
             if (row.Profile != Guid.Empty) path = "HKEY_LOCAL_MACHINE\\" + ProfileCatalog.Path(row, row.Profile, row.ProfileScheme);
             try
             {
-                string prefix = Ui.T("计算机", "電腦", "Computer");
+                string prefix = Ui.T("computer");
                 using (RegistryKey key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Applets\Regedit"))
                 {
                     if (key != null) key.SetValue("LastKey", prefix + "\\" + path);
@@ -1926,7 +1884,7 @@ namespace PowerOptionEditor
         static string Explain(uint rc)
         {
             if (rc == Native.AccessDenied)
-                return Ui.T("拒绝访问。请使用“以管理员重启”后再写入。", "拒絕存取。請使用「以系統管理員重新啟動」後再寫入。", "Access denied. Use \"Restart as administrator\" and try again.");
+                return Ui.T("access.denied.use.restart.as.administrator.and.try.again");
             return Native.ErrorText(rc);
         }
 
@@ -1982,7 +1940,7 @@ namespace PowerOptionEditor
             {
                 Guid group = groups[g];
                 Guid? groupArg = group == Guid.Empty ? (Guid?)null : group;
-                string groupName = group == Guid.Empty ? Ui.T("（方案根设置）", "（配置根設定）", "(Plan root)") : Text(NativeKind.Friendly, null, group, null);
+                string groupName = group == Guid.Empty ? Ui.T("plan.root") : Text(NativeKind.Friendly, null, group, null);
                 if (string.IsNullOrEmpty(groupName)) groupName = group.ToString("B");
                 List<Guid> settings = Enumerate(scheme.Guid, groupArg, Native.AccessSetting);
                 for (int s = 0; s < settings.Count; s++)

@@ -2,6 +2,10 @@
 
 查看并修改 Windows 电源方案设置，包括新版 Windows 隐藏的高级选项。界面支持简体中文、繁体中文和英文。许可：[GNU GPL v3](LICENSE)。
 
+## 参与翻译
+
+界面文案集中在 [`locales/`](locales/)：`en.xml`、`zh-Hans.xml` 和 `zh-Hant.xml`。新增语言只需复制英文文件、翻译文本并提交对应语言的 XML，无需修改 C# 或工程文件。程序按系统界面语言选择翻译，缺失条目回退英文；语言文件自动嵌入 EXE。贡献步骤见 [Translation guide (English)](locales/README.md)，校验命令为 `python scripts/validate-locales.py`。
+
 ## 工程与开源编辑器
 
 这是标准的传统 C# / MSBuild 4.0 工程，目标固定为 **.NET Framework 4.0 完整版、x64**，没有第三方运行依赖。

@@ -30,7 +30,13 @@
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
     <Compile Include="Program.cs" />
+    <Compile Include="Ui.cs" />
     <Compile Include="ProfileCatalog.cs" />
+    <EmbeddedResource Include="locales\*.xml">
+      <LogicalName>PowerOptionEditor.Locales.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <None Include="locales\README.md" />
+    <None Include="scripts\validate-locales.py" />
     <None Include="app.manifest" />
     <None Include="README.md" />
     <None Include="LICENSE" />
