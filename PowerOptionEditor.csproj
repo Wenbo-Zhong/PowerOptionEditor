@@ -31,6 +31,7 @@
     <Reference Include="System.Xml" />
     <Compile Include="Program.cs" />
     <Compile Include="Ui.cs" />
+    <Compile Include="AppTheme.cs" />
     <Compile Include="ProfileCatalog.cs" />
     <EmbeddedResource Include="locales\*.xml">
       <LogicalName>PowerOptionEditor.Locales.%(Filename)%(Extension)</LogicalName>

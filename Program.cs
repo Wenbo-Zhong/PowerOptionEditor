@@ -969,12 +969,14 @@ namespace PowerOptionEditor
         readonly ComboBox _schemes = new ComboBox();
         readonly ComboBox _profiles = new ComboBox();
         readonly ComboBox _profileSchemes = new ComboBox();
-        readonly TabControl _mode = new TabControl();
+        readonly ThemeTabs _mode = new ThemeTabs();
+        readonly AppTheme _theme = new AppTheme();
+        bool _themeUpdateQueued;
         readonly TableLayoutPanel _pageContent = new TableLayoutPanel();
         readonly List<Control> _dailyControls = new List<Control>();
         bool SceneMode { get { return _mode.SelectedIndex == 1; } }
         readonly TextBox _search = new TextBox();
-        readonly ListView _grid = new ListView();
+        readonly ListView _grid = new BufferedListView();
         readonly TextBox _description = new TextBox();
         readonly Label _meta = new Label();
         readonly ComboBox _acList = new ComboBox();
@@ -982,12 +984,24 @@ namespace PowerOptionEditor
         readonly TextBox _acBox = new TextBox();
         readonly TextBox _dcBox = new TextBox();
         readonly CheckBox _hidden = new CheckBox();
-        readonly Button _apply = new Button();
-        readonly Button _defaults = new Button();
+        readonly Button _apply = new ThemeButton();
+        readonly Button _defaults = new ThemeButton();
         readonly Label _status = new Label();
         readonly Label _pending = new Label();
         readonly List<SettingRow> _rows = new List<SettingRow>();
         List<SettingRow> _processorTemplates;
+        readonly Dictionary<string, List<SettingRow>> _dailyCache = new Dictionary<string, List<SettingRow>>();
+        readonly Dictionary<string, int[]> _columnWidths = new Dictionary<string, int[]>();
+        readonly Dictionary<string, GridPosition> _gridPositions = new Dictionary<string, GridPosition>();
+        string _boundViewKey;
+        bool _profilesLoaded;
+        bool _layoutQueued;
+
+        sealed class GridPosition
+        {
+            public Guid Setting, Scheme;
+            public int TopIndex;
+        }
         readonly Panel _bar = new Panel();
         readonly Panel _editorRow = new Panel();
         readonly Panel _actionRow = new Panel();
@@ -1036,6 +1050,7 @@ namespace PowerOptionEditor
             _mode.Selecting += delegate(object sender, TabControlCancelEventArgs e)
             {
                 if (e.TabPageIndex == 1 && !FixedCatalog.Modern) e.Cancel = true;
+                else SaveGridPosition();
             };
             _mode.SelectedIndexChanged += delegate { ReloadProfiles(); };
 
@@ -1119,7 +1134,7 @@ namespace PowerOptionEditor
             AddColumn(Ui.T("default.battery"));
             AddColumn(Ui.T("hidden"));
             AddColumn(Ui.T("units"));
-            _grid.SelectedIndexChanged += delegate { ShowSelected(); };
+            _grid.SelectedIndexChanged += delegate { if (!_filling) ShowSelected(); if (_theme.Dark) _grid.Invalidate(); };
             _grid.DoubleClick += delegate { OpenRegistry(); };
             root.Controls.Add(_grid, 0, 1);
 
@@ -1223,7 +1238,67 @@ namespace PowerOptionEditor
                 }
             };
 
-            Shown += delegate { ArrangeBar(); ArrangeEditors(); ArrangeActions(); ReloadSchemes(false); };
+            Shown += delegate { RefreshTheme(); ArrangeBar(); ArrangeEditors(); ArrangeActions(); ReloadSchemes(false); };
+        }
+
+        void SaveGridPosition()
+        {
+            if (_boundViewKey == null || _grid.Items.Count == 0) return;
+            SettingRow row = SelectedRow();
+            if (row == null) return;
+            _gridPositions[_boundViewKey] = new GridPosition { Setting = row.Setting, Scheme = row.ProfileScheme,
+                TopIndex = _grid.TopItem == null ? 0 : _grid.TopItem.Index };
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            QueueLayoutRepair();
+        }
+
+        void QueueLayoutRepair()
+        {
+            if (_layoutQueued || !IsHandleCreated || IsDisposed || WindowState == FormWindowState.Minimized) return;
+            _layoutQueued = true;
+            BeginInvoke((MethodInvoker)delegate
+            {
+                _layoutQueued = false;
+                if (IsDisposed || WindowState == FormWindowState.Minimized) return;
+                _pageContent.SuspendLayout();
+                ArrangeBar();
+                ArrangeEditors();
+                ArrangeActions();
+                _pageContent.ResumeLayout(true);
+                _pageContent.PerformLayout();
+                _grid.Invalidate();
+            });
+        }
+
+        void RefreshTheme()
+        {
+            if (_theme.Apply(this)) UpdatePendingChanges();
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            _theme.ApplyTitleBar(Handle);
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            // Theme, preference and high-contrast broadcasts can arrive in a burst.
+            if ((m.Msg == 0x001A || m.Msg == 0x031A || m.Msg == 0x0015)
+                && IsHandleCreated && !IsDisposed && !_themeUpdateQueued)
+            {
+                _themeUpdateQueued = true;
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    _themeUpdateQueued = false;
+                    if (!IsDisposed) RefreshTheme();
+                });
+            }
         }
 
         Label MakeLabel(string text)
@@ -1238,7 +1313,7 @@ namespace PowerOptionEditor
 
         Button MakeButton(string text)
         {
-            Button button = new Button();
+            Button button = new ThemeButton();
             button.Text = text;
             button.AutoSize = true;
             button.Margin = Padding.Empty;
@@ -1253,7 +1328,7 @@ namespace PowerOptionEditor
 
         void ArrangeBar()
         {
-            if (_arrangingBar) return;
+            if (_arrangingBar || WindowState == FormWindowState.Minimized || _bar.ClientSize.Width < Dpi.S(200)) return;
             _arrangingBar = true;
             int gap = Dpi.S(8);
             int x = 0;
@@ -1280,7 +1355,7 @@ namespace PowerOptionEditor
 
         void ArrangeEditors()
         {
-            if (_arrangingEditors || _acCaption == null) return;
+            if (_arrangingEditors || _acCaption == null || WindowState == FormWindowState.Minimized || _editorRow.ClientSize.Width < Dpi.S(200)) return;
             _arrangingEditors = true;
             int pairGap = Dpi.S(6);
             int splitGap = Dpi.S(28);
@@ -1307,7 +1382,7 @@ namespace PowerOptionEditor
 
         void ArrangeActions()
         {
-            if (_arrangingActions) return;
+            if (_arrangingActions || WindowState == FormWindowState.Minimized) return;
             _arrangingActions = true;
             int gap = Dpi.S(8);
             int x = 0;
@@ -1348,6 +1423,14 @@ namespace PowerOptionEditor
 
         void FitColumns()
         {
+            string key = (_boundViewKey ?? "") + "|" + _search.Text;
+            int[] cached;
+            if (_columnWidths.TryGetValue(key, out cached))
+            {
+                for (int c = 0; c < cached.Length; c++) _grid.Columns[c].Width = cached[c];
+                return;
+            }
+            int[] widths = new int[_grid.Columns.Count];
             int pad = Dpi.S(18);
             for (int c = 0; c < _grid.Columns.Count; c++)
             {
@@ -1360,12 +1443,17 @@ namespace PowerOptionEditor
                     if (itemWidth > width) width = itemWidth;
                 }
                 _grid.Columns[c].Width = width;
+                widths[c] = width;
             }
+            _columnWidths[key] = widths;
         }
 
         void ReloadSchemes(bool keep)
         {
             _processorTemplates = null;
+            _dailyCache.Clear();
+            _columnWidths.Clear();
+            _profilesLoaded = false;
             Guid previous = Guid.Empty;
             uint legacy = 0;
             bool wasLegacy = false;
@@ -1403,12 +1491,14 @@ namespace PowerOptionEditor
 
         void ReloadProfiles()
         {
+            _pageContent.SuspendLayout();
             _mode.SelectedTab.Controls.Add(_pageContent);
             _profiles.Visible = SceneMode;
             foreach (Control control in _dailyControls) control.Visible = !SceneMode;
-            ArrangeActions();
-            ArrangeBar();
+            _pageContent.ResumeLayout(true);
+            QueueLayoutRepair();
             if (!SceneMode) { ReloadSettings(); return; }
+            if (_profilesLoaded) { ReloadProfileSchemes(); return; }
             try
             {
                 Guid previous = _profiles.SelectedItem is ProfileItem ? ((ProfileItem)_profiles.SelectedItem).Guid : Guid.Empty;
@@ -1420,6 +1510,7 @@ namespace PowerOptionEditor
                 for (int i = 0; i < _profiles.Items.Count; i++)
                     if (((ProfileItem)_profiles.Items[i]).Guid == previous) selected = i;
                 if (_profiles.Items.Count > 0) _profiles.SelectedIndex = selected;
+                _profilesLoaded = true;
             }
             catch (Exception ex) { Report(ex.Message); }
             finally { _filling = false; }
@@ -1454,12 +1545,15 @@ namespace PowerOptionEditor
             UseWaitCursor = true;
             try
             {
+                SaveGridPosition();
                 _rows.Clear();
+                _boundViewKey = null;
                 if (scheme != null)
                 {
                     ProfileItem profile = _profiles.SelectedItem as ProfileItem;
                     if (SceneMode && profile != null)
                     {
+                        _boundViewKey = "profile:" + profile.Guid.ToString();
                         if (_processorTemplates == null) CacheProcessorTemplates(FixedCatalog.LoadSettings(scheme));
                         foreach (SchemeItem target in _profileSchemes.Items)
                         {
@@ -1475,7 +1569,14 @@ namespace PowerOptionEditor
                     }
                     else if (!SceneMode)
                     {
-                        _rows.AddRange(FixedCatalog.LoadSettings(scheme));
+                        _boundViewKey = "daily:" + (scheme.Legacy ? scheme.LegacyIndex.ToString(CultureInfo.InvariantCulture) : scheme.Guid.ToString());
+                        List<SettingRow> cached;
+                        if (!_dailyCache.TryGetValue(_boundViewKey, out cached))
+                        {
+                            cached = FixedCatalog.LoadSettings(scheme);
+                            _dailyCache[_boundViewKey] = cached;
+                        }
+                        _rows.AddRange(cached);
                         CacheProcessorTemplates(_rows);
                     }
                 }
@@ -1509,27 +1610,42 @@ namespace PowerOptionEditor
                 if (group != 0) return group;
                 return string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase);
             });
+            _filling = true;
             _grid.BeginUpdate();
-            _grid.Items.Clear();
-            for (int i = 0; i < view.Count; i++)
+            GridPosition position = null;
+            try
             {
-                SettingRow row = view[i];
-                ListViewItem item = new ListViewItem(row.GroupName);
-                item.SubItems.Add(row.Name);
-                item.SubItems.Add(row.AcText);
-                item.SubItems.Add(row.DcText);
-                item.SubItems.Add(row.AcDefaultText);
-                item.SubItems.Add(row.DcDefaultText);
-                item.SubItems.Add(row.AttributesKnown ? (row.Hidden ? Ui.T("yes") : Ui.T("no")) : "");
-                item.SubItems.Add(row.Units ?? "");
-                item.ToolTipText = row.Description ?? "";
-                item.Tag = row;
-                _grid.Items.Add(item);
+                _grid.Items.Clear();
+                for (int i = 0; i < view.Count; i++)
+                {
+                    SettingRow row = view[i];
+                    ListViewItem item = new ListViewItem(row.GroupName);
+                    item.SubItems.Add(row.Name);
+                    item.SubItems.Add(row.AcText);
+                    item.SubItems.Add(row.DcText);
+                    item.SubItems.Add(row.AcDefaultText);
+                    item.SubItems.Add(row.DcDefaultText);
+                    item.SubItems.Add(row.AttributesKnown ? (row.Hidden ? Ui.T("yes") : Ui.T("no")) : "");
+                    item.SubItems.Add(row.Units ?? "");
+                    item.ToolTipText = row.Description ?? "";
+                    item.Tag = row;
+                    _grid.Items.Add(item);
+                }
+                FitColumns();
+                int selectedIndex = 0;
+                if (_boundViewKey != null && _gridPositions.TryGetValue(_boundViewKey, out position))
+                {
+                    for (int i = 0; i < _grid.Items.Count; i++)
+                    {
+                        SettingRow row = (SettingRow)_grid.Items[i].Tag;
+                        if (row.Setting == position.Setting && row.ProfileScheme == position.Scheme) { selectedIndex = i; break; }
+                    }
+                }
+                if (_grid.Items.Count > 0) _grid.Items[selectedIndex].Selected = true;
             }
-            _grid.EndUpdate();
-            FitColumns();
-            if (_grid.Items.Count > 0) _grid.Items[0].Selected = true;
-            else ShowSelected();
+            finally { _grid.EndUpdate(); _filling = false; }
+            if (position != null && _grid.Items.Count > 0) _grid.TopItem = _grid.Items[Math.Min(position.TopIndex, _grid.Items.Count - 1)];
+            ShowSelected();
         }
 
         static bool Contains(SettingRow row, string query)
@@ -1610,17 +1726,20 @@ namespace PowerOptionEditor
             _pending.Text = changed
                 ? Ui.T("changes.have.not.been.written.click.write.values.to.save")
                 : Ui.T("no.pending.changes");
-            _pending.BackColor = changed ? Color.FromArgb(255, 244, 214) : SystemColors.Control;
-            _pending.ForeColor = changed ? Color.FromArgb(112, 76, 20) : SystemColors.ControlText;
-            _acBox.BackColor = _acList.BackColor = acChanged ? Color.LightYellow : SystemColors.Window;
-            _dcBox.BackColor = _dcList.BackColor = dcChanged ? Color.LightYellow : SystemColors.Window;
-            _hidden.BackColor = hiddenChanged ? Color.LightYellow : SystemColors.Control;
+            _pending.BackColor = changed ? _theme.Pending : _theme.Surface;
+            _pending.ForeColor = changed ? _theme.PendingText : _theme.Text;
+            _acBox.BackColor = _acList.BackColor = acChanged ? _theme.Pending : _theme.Input;
+            _dcBox.BackColor = _dcList.BackColor = dcChanged ? _theme.Pending : _theme.Input;
+            _acBox.ForeColor = _acList.ForeColor = acChanged ? _theme.PendingText : _theme.InputText;
+            _dcBox.ForeColor = _dcList.ForeColor = dcChanged ? _theme.PendingText : _theme.InputText;
+            _hidden.BackColor = hiddenChanged ? _theme.Pending : _theme.Surface;
+            _hidden.ForeColor = hiddenChanged ? _theme.PendingText : _theme.Text;
             _apply.Text = changed
                 ? Ui.T("write.values.pending")
                 : Ui.T("write.values");
-            _apply.UseVisualStyleBackColor = !changed;
-            _apply.BackColor = changed ? Color.FromArgb(246, 226, 180) : SystemColors.Control;
-            _apply.ForeColor = changed ? Color.FromArgb(112, 76, 20) : SystemColors.ControlText;
+            _apply.UseVisualStyleBackColor = !changed && !_theme.Dark;
+            _apply.BackColor = changed ? _theme.Pending : _theme.Surface;
+            _apply.ForeColor = changed ? _theme.PendingText : _theme.Text;
             Text = (FixedCatalog.Modern ? Ui.Title : Ui.Title + Ui.T("legacy.power.schemes.windows.server.2003"))
                 + (changed ? Ui.T("unsaved.changes") : "");
             ArrangeActions();
@@ -1685,6 +1804,9 @@ namespace PowerOptionEditor
                     if (rc == Native.Ok) changed++;
                     else { failed++; if (firstError == Native.Ok) firstError = rc; }
                 }
+                _dailyCache.Clear();
+                _columnWidths.Clear();
+                _processorTemplates = null;
                 ReloadSettings();
                 Report(Ui.T("unhidden") + changed.ToString(CultureInfo.InvariantCulture)
                     + Ui.T("failed") + failed.ToString(CultureInfo.InvariantCulture)
@@ -1760,6 +1882,7 @@ namespace PowerOptionEditor
 
         void RefreshRow(SettingRow row)
         {
+            _columnWidths.Clear();
             for (int i = 0; i < _grid.Items.Count; i++)
             {
                 if (!object.ReferenceEquals(_grid.Items[i].Tag, row)) continue;
@@ -1820,6 +1943,9 @@ namespace PowerOptionEditor
                 int skipped;
                 uint error;
                 int failed = PlanFile.Import(dialog.FileName, out written, out skipped, out error);
+                _dailyCache.Clear();
+                _columnWidths.Clear();
+                _processorTemplates = null;
                 ReloadSettings();
                 if (error != Native.Ok)
                     Report(Ui.T("import.stopped") + Explain(error));
