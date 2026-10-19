@@ -30,6 +30,7 @@
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
     <Compile Include="Program.cs" />
+    <Compile Include="ProfileCatalog.cs" />
     <None Include="app.manifest" />
     <None Include="README.md" />
     <None Include="LICENSE" />

@@ -322,6 +322,8 @@ namespace PowerOptionEditor
     sealed class SettingRow
     {
         public bool Legacy;
+        public Guid Profile;
+        public Guid ProfileScheme;
         public int LegacyField;
         public Guid Subgroup;
         public Guid Setting;
@@ -338,14 +340,23 @@ namespace PowerOptionEditor
         public bool UnsupportedValue;
         public readonly List<ValueChoice> Choices = new List<ValueChoice>();
 
+        public SettingRow CopyForProfile()
+        {
+            // Choice definitions are read-only after discovery. Values and UI state
+            // belong to each independent scenario row.
+            return (SettingRow)MemberwiseClone();
+        }
+
         public string AcText { get { return Format(HasAc, Ac); } }
         public string DcText { get { return Format(HasDc, Dc); } }
-        public string AcDefaultText { get { return Format(HasAcDefault, AcDefault); } }
-        public string DcDefaultText { get { return Format(HasDcDefault, DcDefault); } }
+        public string AcDefaultText { get { return Profile == Guid.Empty ? Format(HasAcDefault, AcDefault) : ""; } }
+        public string DcDefaultText { get { return Profile == Guid.Empty ? Format(HasDcDefault, DcDefault) : ""; } }
 
         string Format(bool has, uint value)
         {
-            if (!has) return "";
+            if (!has) return Profile != Guid.Empty ? Ui.T("未覆盖", "未覆寫", "Not overridden") : "";
+            if (Profile != Guid.Empty && value == 0 && (Setting == new Guid("75b0ae3f-bce0-45a7-8c89-c9611c25e100") || Setting == new Guid("75b0ae3f-bce0-45a7-8c89-c9611c25e101")))
+                return Ui.T("不封顶", "無上限", "Unlimited");
             for (int i = 0; i < Choices.Count; i++)
             {
                 if (Choices[i].Value == value)
@@ -747,6 +758,7 @@ namespace PowerOptionEditor
 
         public static uint WriteIndex(SchemeItem scheme, SettingRow row, bool ac, uint value)
         {
+            if (row.Profile != Guid.Empty) return ProfileCatalog.WriteIndex(scheme, row, ac, value);
             if (scheme.Legacy) return WriteLegacy(scheme, row, ac, value);
             using (GuidAlloc schemePtr = new GuidAlloc(scheme.Guid))
             using (GuidAlloc groupPtr = new GuidAlloc(row.Subgroup == Guid.Empty ? (Guid?)null : row.Subgroup))
@@ -997,6 +1009,12 @@ namespace PowerOptionEditor
     sealed class MainForm : Form
     {
         readonly ComboBox _schemes = new ComboBox();
+        readonly ComboBox _profiles = new ComboBox();
+        readonly ComboBox _profileSchemes = new ComboBox();
+        readonly TabControl _mode = new TabControl();
+        readonly TableLayoutPanel _pageContent = new TableLayoutPanel();
+        readonly List<Control> _dailyControls = new List<Control>();
+        bool SceneMode { get { return _mode.SelectedIndex == 1; } }
         readonly TextBox _search = new TextBox();
         readonly ListView _grid = new ListView();
         readonly TextBox _description = new TextBox();
@@ -1011,6 +1029,7 @@ namespace PowerOptionEditor
         readonly Label _status = new Label();
         readonly Label _pending = new Label();
         readonly List<SettingRow> _rows = new List<SettingRow>();
+        List<SettingRow> _processorTemplates;
         readonly Panel _bar = new Panel();
         readonly Panel _editorRow = new Panel();
         readonly Panel _actionRow = new Panel();
@@ -1032,7 +1051,7 @@ namespace PowerOptionEditor
             ClientSize = new Size(Dpi.S(1100), Dpi.S(720));
             MinimumSize = new Size(Dpi.S(860), Dpi.S(560));
 
-            TableLayoutPanel root = new TableLayoutPanel();
+            TableLayoutPanel root = _pageContent;
             root.Dock = DockStyle.Fill;
             root.ColumnCount = 1;
             root.RowCount = 4;
@@ -1041,14 +1060,40 @@ namespace PowerOptionEditor
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, Dpi.S(198)));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, Dpi.S(24)));
-            Controls.Add(root);
+
 
             _bar.Dock = DockStyle.Top;
-            _bar.AutoSize = true;
+            _bar.AutoSize = false;
+            _bar.SizeChanged += delegate { ArrangeBar(); };
             _bar.Margin = new Padding(0, 0, 0, Dpi.S(6));
             root.Controls.Add(_bar, 0, 0);
 
-            AddBar(MakeLabel(Ui.T("电源方案", "電源配置", "Power plan")));
+            _mode.TabPages.Add(Ui.T("日常", "日常", "Daily"));
+            _mode.TabPages.Add(Ui.T("场景", "場景", "Scenarios"));
+            _mode.Dock = DockStyle.Fill;
+            Controls.Add(_mode);
+            _mode.TabPages[0].Controls.Add(root);
+            // Only block the scenario page on legacy systems; disabling the
+            // container would also disable every daily setting inside it.
+            _mode.Selecting += delegate(object sender, TabControlCancelEventArgs e)
+            {
+                if (e.TabPageIndex == 1 && !FixedCatalog.Modern) e.Cancel = true;
+            };
+            _mode.SelectedIndexChanged += delegate { ReloadProfiles(); };
+
+            _profiles.DropDownStyle = _profileSchemes.DropDownStyle = ComboBoxStyle.DropDownList;
+            _profiles.Width = Dpi.S(180);
+            _profileSchemes.Width = Dpi.S(240);
+            _profiles.Visible = _profileSchemes.Visible = false;
+            _profiles.SelectedIndexChanged += delegate { ReloadProfileSchemes(); };
+            _profileSchemes.SelectedIndexChanged += delegate { ReloadSettings(); };
+            AddBar(_profiles);
+            // Scheme overrides are listed together in the scenario grid.
+            // Keep this selector internal so the toolbar only needs the scenario menu.
+            Label planCaption = MakeLabel(Ui.T("电源方案", "電源配置", "Power plan"));
+            AddBar(planCaption);
+            _dailyControls.Add(planCaption);
+            _dailyControls.Add(_schemes);
             _schemes.DropDownStyle = ComboBoxStyle.DropDownList;
             _schemes.Width = Dpi.S(280);
             _schemes.SelectedIndexChanged += delegate { ReloadSettings(); };
@@ -1059,7 +1104,7 @@ namespace PowerOptionEditor
             AddBar(activate);
 
             Button refresh = MakeButton(Ui.T("刷新", "重新整理", "Refresh"));
-            refresh.Click += delegate { ReloadSchemes(true); };
+            refresh.Click += delegate { ReloadSchemes(true); if (SceneMode) ReloadProfiles(); };
             AddBar(refresh);
 
             AddBar(MakeLabel(Ui.T("搜索", "搜尋", "Search")));
@@ -1074,6 +1119,16 @@ namespace PowerOptionEditor
             Button import = MakeButton(Ui.T("导入", "匯入", "Import"));
             import.Click += delegate { OnImport(); };
             AddBar(import);
+            Button unhideAll = MakeButton(Ui.T("取消隐藏所有隐藏选项", "取消隱藏所有隱藏選項", "Unhide all hidden options"));
+            unhideAll.Click += delegate { OnUnhideAll(); };
+            unhideAll.Enabled = Native.ModernAvailable();
+            AddBar(unhideAll);
+            _dailyControls.Add(unhideAll);
+            _dailyControls.Add(activate);
+            _dailyControls.Add(export);
+            _dailyControls.Add(import);
+            _dailyControls.Add(_hidden);
+            _dailyControls.Add(_defaults);
 
             Button cpl = MakeButton(Ui.T("系统电源选项", "系統電源選項", "Power Options"));
             cpl.Click += delegate
@@ -1248,17 +1303,20 @@ namespace PowerOptionEditor
             for (int i = 0; i < _bar.Controls.Count; i++)
             {
                 Control control = _bar.Controls[i];
-                if (control.Height > maxH) maxH = control.Height;
+                if (control.Visible && control.Height > maxH) maxH = control.Height;
             }
             if (maxH < 1) maxH = Font.Height + Dpi.S(8);
+            int y = 0;
             for (int i = 0; i < _bar.Controls.Count; i++)
             {
                 Control control = _bar.Controls[i];
+                if (!control.Visible) continue;
+                if (x > 0 && x + control.Width > _bar.ClientSize.Width) { x = 0; y += maxH + gap; }
                 control.Left = x;
-                control.Top = Math.Max(0, (maxH - control.Height) / 2);
+                control.Top = y + Math.Max(0, (maxH - control.Height) / 2);
                 x += control.Width + gap;
             }
-            _bar.Height = maxH;
+            _bar.Height = y + maxH;
             _arrangingBar = false;
         }
 
@@ -1299,12 +1357,14 @@ namespace PowerOptionEditor
             for (int i = 0; i < _actionRow.Controls.Count; i++)
             {
                 Control control = _actionRow.Controls[i];
+                if (!control.Visible) continue;
                 if (control.Height > maxH) maxH = control.Height;
             }
             if (maxH < 1) maxH = Font.Height + Dpi.S(8);
             for (int i = 0; i < _actionRow.Controls.Count; i++)
             {
                 Control control = _actionRow.Controls[i];
+                if (!control.Visible) continue;
                 control.Left = x;
                 control.Top = Math.Max(0, (maxH - control.Height) / 2);
                 x += control.Width + gap;
@@ -1333,6 +1393,7 @@ namespace PowerOptionEditor
             int pad = Dpi.S(18);
             for (int c = 0; c < _grid.Columns.Count; c++)
             {
+                if (SceneMode && c >= 4 && c <= 6) { _grid.Columns[c].Width = 0; continue; }
                 int width = TextRenderer.MeasureText(_grid.Columns[c].Text, _grid.Font).Width + pad;
                 for (int i = 0; i < _grid.Items.Count; i++)
                 {
@@ -1346,6 +1407,7 @@ namespace PowerOptionEditor
 
         void ReloadSchemes(bool keep)
         {
+            _processorTemplates = null;
             Guid previous = Guid.Empty;
             uint legacy = 0;
             bool wasLegacy = false;
@@ -1381,6 +1443,52 @@ namespace PowerOptionEditor
                 : Ui.Title + Ui.T("（旧式电源方案，Windows Server 2003）", "（舊式電源配置，Windows Server 2003）", " (legacy power schemes, Windows Server 2003)");
         }
 
+        void ReloadProfiles()
+        {
+            _mode.SelectedTab.Controls.Add(_pageContent);
+            _profiles.Visible = SceneMode;
+            foreach (Control control in _dailyControls) control.Visible = !SceneMode;
+            ArrangeActions();
+            ArrangeBar();
+            if (!SceneMode) { ReloadSettings(); return; }
+            try
+            {
+                Guid previous = _profiles.SelectedItem is ProfileItem ? ((ProfileItem)_profiles.SelectedItem).Guid : Guid.Empty;
+                _filling = true;
+                _profiles.Items.Clear();
+                foreach (ProfileItem profile in ProfileCatalog.LoadProfiles())
+                    if (ProfileCatalog.HasAdjustableTargets(profile)) _profiles.Items.Add(profile);
+                int selected = 0;
+                for (int i = 0; i < _profiles.Items.Count; i++)
+                    if (((ProfileItem)_profiles.Items[i]).Guid == previous) selected = i;
+                if (_profiles.Items.Count > 0) _profiles.SelectedIndex = selected;
+            }
+            catch (Exception ex) { Report(ex.Message); }
+            finally { _filling = false; }
+            ReloadProfileSchemes();
+        }
+
+        void ReloadProfileSchemes()
+        {
+            if (_filling || !SceneMode) return;
+            ProfileItem profile = _profiles.SelectedItem as ProfileItem;
+            SchemeItem daily = _schemes.SelectedItem as SchemeItem;
+            SchemeItem previous = _profileSchemes.SelectedItem as SchemeItem;
+            try
+            {
+                _filling = true;
+                _profileSchemes.Items.Clear();
+                if (profile != null) foreach (SchemeItem scheme in ProfileCatalog.LoadSchemes(profile, daily)) _profileSchemes.Items.Add(scheme);
+                int selected = 0;
+                for (int i = 0; i < _profileSchemes.Items.Count; i++)
+                    if (((SchemeItem)_profileSchemes.Items[i]).Guid == (previous != null ? previous.Guid : daily != null ? daily.Guid : Guid.Empty)) selected = i;
+                if (_profileSchemes.Items.Count > 0) _profileSchemes.SelectedIndex = selected;
+            }
+            catch (Exception ex) { Report(ex.Message); }
+            finally { _filling = false; }
+            ReloadSettings();
+        }
+
         void ReloadSettings()
         {
             if (_filling) return;
@@ -1389,13 +1497,43 @@ namespace PowerOptionEditor
             try
             {
                 _rows.Clear();
-                if (scheme != null) _rows.AddRange(FixedCatalog.LoadSettings(scheme));
+                if (scheme != null)
+                {
+                    ProfileItem profile = _profiles.SelectedItem as ProfileItem;
+                    if (SceneMode && profile != null)
+                    {
+                        if (_processorTemplates == null) CacheProcessorTemplates(FixedCatalog.LoadSettings(scheme));
+                        foreach (SchemeItem target in _profileSchemes.Items)
+                        {
+                            List<SettingRow> overrides = ProfileCatalog.LoadSettings(profile, target, _processorTemplates);
+                            foreach (SettingRow row in overrides)
+                            {
+                                if (!row.HasAc && !row.HasDc) continue;
+                                row.ProfileScheme = target.Guid;
+                                if (_profileSchemes.Items.Count > 1) row.GroupName += " — " + target.Name;
+                                _rows.Add(row);
+                            }
+                        }
+                    }
+                    else if (!SceneMode)
+                    {
+                        _rows.AddRange(FixedCatalog.LoadSettings(scheme));
+                        CacheProcessorTemplates(_rows);
+                    }
+                }
                 BindGrid();
                 Report(Ui.T("已加载 ", "已載入 ", "Loaded ") + _rows.Count.ToString(CultureInfo.InvariantCulture) + Ui.T(" 项。", " 項。", " settings.")
                     + (FixedCatalog.Modern ? "" : Ui.T(" 当前系统没有 Vista 之后的电源接口，正在使用旧式电源方案。", " 目前系統沒有 Vista 之後的電源介面，正在使用舊式電源配置。", " This system has no power interface from Vista onward, so legacy schemes are used.")));
             }
             catch (Exception ex) { Report(ex.Message); }
             finally { UseWaitCursor = false; }
+        }
+
+        void CacheProcessorTemplates(List<SettingRow> rows)
+        {
+            _processorTemplates = new List<SettingRow>();
+            foreach (SettingRow row in rows)
+                if (row.Subgroup == ProfileCatalog.Processor) _processorTemplates.Add(row.CopyForProfile());
         }
 
         void BindGrid()
@@ -1461,13 +1599,17 @@ namespace PowerOptionEditor
             try
             {
                 bool has = row != null;
-                _apply.Enabled = has && !row.UnsupportedValue;
+                _apply.Enabled = has && !row.UnsupportedValue && (row.HasAc || row.HasDc);
                 _defaults.Enabled = has && !row.Legacy && (row.HasAcDefault || row.HasDcDefault);
-                _hidden.Enabled = has && row.AttributesKnown && !row.Legacy;
-                _description.Text = has ? (row.Description ?? "") : "";
+                _hidden.Enabled = has && row.AttributesKnown && !row.Legacy && row.Profile == Guid.Empty;
+                _description.Text = has ? (row.Description ?? "") + (row.Profile != Guid.Empty ? Ui.T("\r\n场景覆盖值；未覆盖时使用日常值。保存后下次进入该场景时生效。", "\r\n場景覆寫值；未覆寫時使用日常值。儲存後下次進入該場景時生效。", "\r\nScenario override; missing values use daily settings. Changes take effect on the next scenario entry.") : "") : "";
                 if (!has)
                 {
                     _meta.Text = "";
+                    _acList.Visible = _dcList.Visible = false;
+                    _acBox.Visible = _dcBox.Visible = true;
+                    _acBox.Text = _dcBox.Text = "";
+                    _acBox.Enabled = _dcBox.Enabled = false;
                     _hidden.Checked = false;
                     return;
                 }
@@ -1533,7 +1675,7 @@ namespace PowerOptionEditor
             {
                 list.Visible = false;
                 box.Visible = true;
-                box.Text = "";
+                box.Text = row.Profile != Guid.Empty && !has ? Ui.T("未覆盖", "未覆寫", "Not overridden") : "";
                 box.Enabled = false;
                 return;
             }
@@ -1567,12 +1709,40 @@ namespace PowerOptionEditor
             }
         }
 
+        void OnUnhideAll()
+        {
+            if (SceneMode || !FixedCatalog.Modern) return;
+            SchemeItem scheme = _schemes.SelectedItem as SchemeItem;
+            if (scheme == null) return;
+            int changed = 0, failed = 0;
+            uint firstError = Native.Ok;
+            UseWaitCursor = true;
+            try
+            {
+                // Reload the complete daily catalog: search must not limit this operation.
+                foreach (SettingRow row in FixedCatalog.LoadSettings(scheme))
+                {
+                    if (row.Legacy || !row.AttributesKnown || !row.Hidden) continue;
+                    uint rc = FixedCatalog.WriteHidden(row, false);
+                    if (rc == Native.Ok) changed++;
+                    else { failed++; if (firstError == Native.Ok) firstError = rc; }
+                }
+                ReloadSettings();
+                Report(Ui.T("已取消隐藏 ", "已取消隱藏 ", "Unhidden: ") + changed.ToString(CultureInfo.InvariantCulture)
+                    + Ui.T(" 项；失败 ", " 項；失敗 ", "; failed: ") + failed.ToString(CultureInfo.InvariantCulture)
+                    + (failed > 0 ? ". " + Explain(firstError) : ""));
+            }
+            catch (Exception ex) { Report(ex.Message); }
+            finally { UseWaitCursor = false; }
+        }
+
         void OnApply(bool useDefault)
         {
             if (_filling) return;
-            SchemeItem scheme = _schemes.SelectedItem as SchemeItem;
+            SchemeItem scheme = (SceneMode ? _profileSchemes : _schemes).SelectedItem as SchemeItem;
             SettingRow row = SelectedRow();
             if (scheme == null || row == null) return;
+            if (row.Profile != Guid.Empty) scheme = new SchemeItem { Guid = row.ProfileScheme };
             uint ac, dc;
             if (useDefault)
             {
@@ -1583,6 +1753,13 @@ namespace PowerOptionEditor
             else if (!TryReadEditor(_acList, _acBox, row.HasAc, row.Ac, out ac) || !TryReadEditor(_dcList, _dcBox, row.HasDc, row.Dc, out dc))
             {
                 Report(Ui.T("请输入 0 到 4294967295 之间的整数。", "請輸入 0 到 4294967295 之間的整數。", "Enter an integer from 0 to 4294967295."));
+                return;
+            }
+            if (row.Profile != Guid.Empty && row.HasRange &&
+                ((row.HasAc && (ac < row.Min || ac > row.Max || (row.Increment > 1 && (ac - row.Min) % row.Increment != 0))) ||
+                 (row.HasDc && (dc < row.Min || dc > row.Max || (row.Increment > 1 && (dc - row.Min) % row.Increment != 0)))))
+            {
+                Report(Ui.T("数值超出范围或不符合步进。", "數值超出範圍或不符合步進。", "Value is outside the range or does not match the increment."));
                 return;
             }
             uint rc = Native.Ok;
@@ -1606,7 +1783,7 @@ namespace PowerOptionEditor
             row.Dc = dc;
             row.HasAc = row.HasAc || useDefault;
             RefreshRow(row);
-            Report(Ui.T("已写入“", "已寫入「", "Wrote \"") + row.Name + Ui.T("”。", "」。", "\"."));
+            Report(Ui.T("已写入“", "已寫入「", "Wrote \"") + row.Name + Ui.T("”。", "」。", "\".") + (row.Profile != Guid.Empty ? Ui.T(" 下次进入该场景时生效。", " 下次進入該場景時生效。", " Takes effect the next time this scenario is entered.") : ""));
         }
 
         static bool TryReadEditor(ComboBox list, TextBox box, bool has, uint current, out uint value)
@@ -1713,12 +1890,13 @@ namespace PowerOptionEditor
 
         void OpenRegistry()
         {
-            SchemeItem scheme = _schemes.SelectedItem as SchemeItem;
+            SchemeItem scheme = (SceneMode ? _profileSchemes : _schemes).SelectedItem as SchemeItem;
             SettingRow row = SelectedRow();
             if (scheme == null || row == null || row.Legacy || scheme.Legacy) return;
             string sub = row.Subgroup == Guid.Empty ? "" : row.Subgroup.ToString("B") + "\\";
             string path = @"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes\"
                 + scheme.Guid.ToString("B") + "\\" + sub + row.Setting.ToString("B");
+            if (row.Profile != Guid.Empty) path = "HKEY_LOCAL_MACHINE\\" + ProfileCatalog.Path(row, row.Profile, row.ProfileScheme);
             try
             {
                 string prefix = Ui.T("计算机", "電腦", "Computer");
@@ -1816,6 +1994,7 @@ namespace PowerOptionEditor
 
         public static uint WriteIndex(SchemeItem scheme, SettingRow row, bool ac, uint value)
         {
+            if (row.Profile != Guid.Empty) return ProfileCatalog.WriteIndex(scheme, row, ac, value);
             if (scheme.Legacy || row.Legacy) return Catalog.WriteIndex(scheme, row, ac, value);
             using (GuidAlloc schemePtr = new GuidAlloc(scheme.Guid))
             using (GuidAlloc groupPtr = new GuidAlloc(row.Subgroup == Guid.Empty ? (Guid?)null : row.Subgroup))
