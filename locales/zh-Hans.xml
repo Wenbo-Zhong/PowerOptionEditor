@@ -16,6 +16,7 @@
   <string key="constrained">受限</string>
   <string key="copied.the.setting.guid">已复制设置 GUID。</string>
   <string key="copy.guid">复制 GUID</string>
+  <string key="could.not.hide.unavailable"> 无法隐藏本机没有的电源选项。请使用“以管理员重启”后刷新。</string>
   <string key="current.unlisted.value">当前未列出的值</string>
   <string key="daily">日常</string>
   <string key="deepest.sleep.state.allowed">允许进入的最深睡眠状态。</string>
@@ -42,6 +43,8 @@
   <string key="group">分组</string>
   <string key="hibernate">休眠</string>
   <string key="hibernate.timeout.seconds">休眠超时（秒）</string>
+  <string key="hid.unavailable.prefix"> 已隐藏 </string>
+  <string key="hid.unavailable.suffix"> 个本机没有的电源选项。</string>
   <string key="hidden">隐藏</string>
   <string key="hide.in.power.options">在系统电源选项中隐藏</string>
   <string key="high.drain">高耗电</string>

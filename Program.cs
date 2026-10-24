@@ -977,7 +977,7 @@ namespace PowerOptionEditor
         bool SceneMode { get { return _mode.SelectedIndex == 1; } }
         readonly TextBox _search = new TextBox();
         readonly ListView _grid = new BufferedListView();
-        readonly TextBox _description = new TextBox();
+        readonly SelectableTextBox _description = new SelectableTextBox();
         readonly Label _meta = new Label();
         readonly ComboBox _acList = new ComboBox();
         readonly ComboBox _dcList = new ComboBox();
@@ -1151,6 +1151,8 @@ namespace PowerOptionEditor
 
             _description.Multiline = true;
             _description.ReadOnly = true;
+            _description.ShortcutsEnabled = true;
+            _description.HideSelection = false;
             _description.ScrollBars = ScrollBars.Vertical;
             _description.Dock = DockStyle.Fill;
             _description.Margin = new Padding(0, 0, 0, Dpi.S(4));
@@ -1543,6 +1545,7 @@ namespace PowerOptionEditor
             if (_filling) return;
             SchemeItem scheme = _schemes.SelectedItem as SchemeItem;
             UseWaitCursor = true;
+            FixedCatalog.UnavailableHideResult hidden = new FixedCatalog.UnavailableHideResult();
             try
             {
                 SaveGridPosition();
@@ -1554,7 +1557,10 @@ namespace PowerOptionEditor
                     if (SceneMode && profile != null)
                     {
                         _boundViewKey = "profile:" + profile.Guid.ToString();
-                        if (_processorTemplates == null) CacheProcessorTemplates(FixedCatalog.LoadSettings(scheme));
+                        List<SettingRow> catalog = FixedCatalog.LoadSettings(scheme);
+                        if (!scheme.Legacy)
+                            hidden = FixedCatalog.HideUnavailable(scheme.Guid, catalog);
+                        if (_processorTemplates == null) CacheProcessorTemplates(catalog);
                         foreach (SchemeItem target in _profileSchemes.Items)
                         {
                             List<SettingRow> overrides = ProfileCatalog.LoadSettings(profile, target, _processorTemplates);
@@ -1578,14 +1584,27 @@ namespace PowerOptionEditor
                         }
                         _rows.AddRange(cached);
                         CacheProcessorTemplates(_rows);
+                        if (!scheme.Legacy)
+                            hidden = FixedCatalog.HideUnavailable(scheme.Guid, cached);
                     }
                 }
                 BindGrid();
                 Report(Ui.T("loaded") + _rows.Count.ToString(CultureInfo.InvariantCulture) + Ui.T("settings")
-                    + (FixedCatalog.Modern ? "" : Ui.T("this.system.has.no.power.interface.from.vista.onward.so.legacy.schemes")));
+                    + (FixedCatalog.Modern ? "" : Ui.T("this.system.has.no.power.interface.from.vista.onward.so.legacy.schemes"))
+                    + HideUnavailableText(hidden));
             }
             catch (Exception ex) { Report(ex.Message); }
             finally { UseWaitCursor = false; }
+        }
+
+        static string HideUnavailableText(FixedCatalog.UnavailableHideResult hidden)
+        {
+            string text = "";
+            if (hidden.Hidden > 0)
+                text += Ui.T("hid.unavailable.prefix") + hidden.Hidden.ToString(CultureInfo.InvariantCulture) + Ui.T("hid.unavailable.suffix");
+            if (hidden.AccessDenied)
+                text += Ui.T("could.not.hide.unavailable");
+            return text;
         }
 
         void CacheProcessorTemplates(List<SettingRow> rows)
@@ -2142,9 +2161,117 @@ namespace PowerOptionEditor
             }
         }
 
+        const string PowerRoot = @"SYSTEM\CurrentControlSet\Control\Power\PowerSettings";
+        const string SchemeRoot = @"SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes";
+
+        public struct UnavailableHideResult
+        {
+            public int Hidden;
+            public bool AccessDenied;
+        }
+
+        /// <summary>
+        /// Settings the power service does not expose, and that have no registry
+        /// name, range, choices, defaults, or scheme value, are not on this machine.
+        /// Mark those keys hidden so Power Options does not list them.
+        /// </summary>
+        public static UnavailableHideResult HideUnavailable(Guid scheme, List<SettingRow> present)
+        {
+            UnavailableHideResult result = new UnavailableHideResult();
+            HashSet<string> keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            HashSet<string> groupsWithSettings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (present != null)
+            {
+                for (int i = 0; i < present.Count; i++)
+                {
+                    if (present[i] == null || present[i].Legacy) continue;
+                    keep.Add(PairKey(present[i].Subgroup, present[i].Setting));
+                    if (present[i].Subgroup != Guid.Empty)
+                        groupsWithSettings.Add(present[i].Subgroup.ToString("D"));
+                }
+            }
+            HashSet<string> schemeValues = LoadSchemeValueKeys();
+            HashSet<string> enumeratedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            List<Guid> groups = Enumerate(scheme, null, Native.AccessSubgroup);
+            for (int i = 0; i < groups.Count; i++)
+                enumeratedGroups.Add(groups[i].ToString("D"));
+
+            List<string> pending = new List<string>();
+            using (RegistryKey readRoot = Registry.LocalMachine.OpenSubKey(PowerRoot))
+            {
+                if (readRoot == null) return result;
+                string[] groupNames = readRoot.GetSubKeyNames();
+                for (int g = 0; g < groupNames.Length; g++)
+                {
+                    Guid groupId;
+                    if (!TryParseGuid(groupNames[g], out groupId)) continue;
+                    using (RegistryKey group = readRoot.OpenSubKey(groupNames[g]))
+                    {
+                        if (group == null) continue;
+                        bool childGuid = false;
+                        bool anyRealChild = false;
+                        string[] children = group.GetSubKeyNames();
+                        for (int s = 0; s < children.Length; s++)
+                        {
+                            Guid settingId;
+                            if (!TryParseGuid(children[s], out settingId)) continue;
+                            childGuid = true;
+                            string pair = PairKey(groupId, settingId);
+                            if (keep.Contains(pair) || schemeValues.Contains(pair))
+                            {
+                                anyRealChild = true;
+                                continue;
+                            }
+                            using (RegistryKey setting = group.OpenSubKey(children[s]))
+                            {
+                                if (HasRegistryIdentity(setting))
+                                {
+                                    anyRealChild = true;
+                                    continue;
+                                }
+                                if (NeedsHiddenAttribute(setting))
+                                    pending.Add(groupNames[g] + "\\" + children[s]);
+                            }
+                        }
+                        bool groupKept = enumeratedGroups.Contains(groupId.ToString("D"))
+                            || groupsWithSettings.Contains(groupId.ToString("D"))
+                            || keep.Contains(PairKey(Guid.Empty, groupId))
+                            || schemeValues.Contains(PairKey(Guid.Empty, groupId))
+                            || anyRealChild
+                            || (!childGuid && HasRegistryIdentity(group));
+                        if (!groupKept && NeedsHiddenAttribute(group))
+                            pending.Add(groupNames[g]);
+                    }
+                }
+            }
+            if (pending.Count == 0) return result;
+            using (RegistryKey writeRoot = Registry.LocalMachine.OpenSubKey(PowerRoot, true))
+            {
+                if (writeRoot == null)
+                {
+                    result.AccessDenied = true;
+                    return result;
+                }
+                for (int i = 0; i < pending.Count; i++)
+                    TrySetHidden(writeRoot, pending[i], ref result);
+            }
+            return result;
+        }
+
+        static bool NeedsHiddenAttribute(RegistryKey key)
+        {
+            if (key == null) return false;
+            object currentObj = key.GetValue("Attributes");
+            if (currentObj != null && !(currentObj is int)) return false;
+            uint current = currentObj is int ? unchecked((uint)(int)currentObj) : 0;
+            uint updated = (current & ~2u) | Native.HideAttribute;
+            return !(currentObj is int) || updated != current;
+        }
+
         static void AddRegistrySettings(List<SettingRow> rows, Guid scheme)
         {
-            RegistryKey root = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Power\PowerSettings");
+            HashSet<string> schemeValues = LoadSchemeValueKeys();
+            RegistryKey root = Registry.LocalMachine.OpenSubKey(PowerRoot);
             if (root == null) return;
             using (root)
             {
@@ -2158,38 +2285,293 @@ namespace PowerOptionEditor
                     using (groupKey)
                     {
                         string groupName = Text(NativeKind.Friendly, null, groupId, null);
-                        if (string.IsNullOrEmpty(groupName)) groupName = groupId.ToString("B");
+                        if (string.IsNullOrEmpty(groupName))
+                        {
+                            groupName = ExpandResource(groupKey.GetValue("FriendlyName") as string);
+                            if (string.IsNullOrEmpty(groupName)) groupName = groupId.ToString("B");
+                        }
+                        bool childGuid = false;
                         string[] settings = groupKey.GetSubKeyNames();
                         for (int s = 0; s < settings.Length; s++)
                         {
                             Guid settingId;
                             if (!TryParseGuid(settings[s], out settingId)) continue;
+                            childGuid = true;
                             RegistryKey settingKey = groupKey.OpenSubKey(settings[s]);
                             if (settingKey == null) continue;
                             using (settingKey)
+                                MergeRegistrySetting(rows, scheme, groupId, groupName, settingId, settingKey, schemeValues);
+                        }
+                        if (!childGuid)
+                            MergeRegistrySetting(rows, scheme, Guid.Empty, Ui.T("plan.root"), groupId, groupKey, schemeValues);
+                    }
+                }
+            }
+            AddSchemeOnlySettings(rows, scheme);
+        }
+
+        static void MergeRegistrySetting(List<SettingRow> rows, Guid scheme, Guid group, string groupName, Guid setting, RegistryKey key, HashSet<string> schemeValues)
+        {
+            bool inScheme = schemeValues.Contains(PairKey(group, setting));
+            SettingRow row = FindRow(rows, group, setting);
+            bool added = false;
+            if (row == null)
+            {
+                if (!HasRegistryIdentity(key) && !inScheme) return;
+                row = ReadSetting(scheme, group, groupName, setting);
+                rows.Add(row);
+                added = true;
+            }
+            OverlayIdentity(key, row);
+            ApplyAttributes(key, row);
+            ReadRegistryChoices(key, row);
+            if (added && !inScheme && !IsMachineSetting(row))
+                rows.Remove(row);
+        }
+
+        static void AddSchemeOnlySettings(List<SettingRow> rows, Guid scheme)
+        {
+            using (RegistryKey schemes = Registry.LocalMachine.OpenSubKey(SchemeRoot))
+            {
+                if (schemes == null) return;
+                string[] schemeNames = schemes.GetSubKeyNames();
+                for (int i = 0; i < schemeNames.Length; i++)
+                {
+                    Guid schemeId;
+                    if (!TryParseGuid(schemeNames[i], out schemeId) || schemeId == Guid.Empty) continue;
+                    using (RegistryKey schemeKey = schemes.OpenSubKey(schemeNames[i]))
+                    {
+                        if (schemeKey == null) continue;
+                        string[] children = schemeKey.GetSubKeyNames();
+                        for (int c = 0; c < children.Length; c++)
+                        {
+                            Guid childId;
+                            if (!TryParseGuid(children[c], out childId)) continue;
+                            using (RegistryKey child = schemeKey.OpenSubKey(children[c]))
                             {
-                                SettingRow row = null;
-                                for (int i = 0; i < rows.Count; i++)
+                                if (child == null) continue;
+                                if (HasIndexValue(child))
+                                    EnsureListed(rows, scheme, Guid.Empty, Ui.T("plan.root"), childId);
+                                string[] settings = child.GetSubKeyNames();
+                                for (int s = 0; s < settings.Length; s++)
                                 {
-                                    if (rows[i].Setting == settingId) { row = rows[i]; break; }
+                                    Guid settingId;
+                                    if (!TryParseGuid(settings[s], out settingId)) continue;
+                                    using (RegistryKey settingKey = child.OpenSubKey(settings[s]))
+                                    {
+                                        if (settingKey != null && HasIndexValue(settingKey))
+                                        {
+                                            string groupName = Text(NativeKind.Friendly, null, childId, null);
+                                            if (string.IsNullOrEmpty(groupName)) groupName = childId.ToString("B");
+                                            EnsureListed(rows, scheme, childId, groupName, settingId);
+                                        }
+                                    }
                                 }
-                                if (row == null)
-                                {
-                                    row = ReadSetting(scheme, groupId, groupName, settingId);
-                                    rows.Add(row);
-                                }
-                                object attr = settingKey.GetValue("Attributes");
-                                if (attr is int)
-                                {
-                                    row.AttributesKnown = true;
-                                    row.Hidden = (((uint)(int)attr) & Native.HideAttribute) != 0;
-                                }
-                                ReadRegistryChoices(settingKey, row);
                             }
                         }
                     }
                 }
             }
+        }
+
+        static void EnsureListed(List<SettingRow> rows, Guid scheme, Guid group, string groupName, Guid setting)
+        {
+            if (FindRow(rows, group, setting) != null) return;
+            SettingRow row = ReadSetting(scheme, group, groupName, setting);
+            using (RegistryKey key = OpenDefinition(group, setting))
+            {
+                if (key != null)
+                {
+                    OverlayIdentity(key, row);
+                    ApplyAttributes(key, row);
+                    ReadRegistryChoices(key, row);
+                }
+            }
+            if (IsMachineSetting(row)) rows.Add(row);
+        }
+
+        static RegistryKey OpenDefinition(Guid group, Guid setting)
+        {
+            string path = group == Guid.Empty
+                ? PowerRoot + "\\" + setting.ToString("D")
+                : PowerRoot + "\\" + group.ToString("D") + "\\" + setting.ToString("D");
+            return Registry.LocalMachine.OpenSubKey(path);
+        }
+
+        static SettingRow FindRow(List<SettingRow> rows, Guid group, Guid setting)
+        {
+            for (int i = 0; i < rows.Count; i++)
+            {
+                SettingRow row = rows[i];
+                if (row.Legacy || row.Setting != setting) continue;
+                if (row.Subgroup == group) return row;
+            }
+            return null;
+        }
+
+        static bool IsMachineSetting(SettingRow row)
+        {
+            if (row.HasAc || row.HasDc || row.HasAcDefault || row.HasDcDefault || row.HasRange || row.Choices.Count > 0)
+                return true;
+            return !IsGuidName(row.Name);
+        }
+
+        static bool IsGuidName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return true;
+            Guid parsed;
+            return TryParseGuid(name, out parsed);
+        }
+
+        static bool HasRegistryIdentity(RegistryKey key)
+        {
+            if (key == null) return false;
+            if (!string.IsNullOrEmpty(ExpandResource(key.GetValue("FriendlyName") as string))) return true;
+            if (!string.IsNullOrEmpty(ExpandResource(key.GetValue("Description") as string))) return true;
+            if (key.GetValue("ValueMin") is int || key.GetValue("ValueMax") is int) return true;
+            using (RegistryKey defaults = key.OpenSubKey("DefaultPowerSchemeValues"))
+                if (defaults != null) return true;
+            string[] names = key.GetSubKeyNames();
+            for (int i = 0; i < names.Length; i++)
+            {
+                int ordinal;
+                if (int.TryParse(names[i], NumberStyles.Integer, CultureInfo.InvariantCulture, out ordinal))
+                    return true;
+            }
+            return false;
+        }
+
+        static void OverlayIdentity(RegistryKey key, SettingRow row)
+        {
+            if (IsGuidName(row.Name))
+            {
+                string name = ExpandResource(key.GetValue("FriendlyName") as string);
+                if (!string.IsNullOrEmpty(name)) row.Name = name;
+            }
+            if (string.IsNullOrEmpty(row.Description))
+            {
+                string description = ExpandResource(key.GetValue("Description") as string);
+                if (!string.IsNullOrEmpty(description)) row.Description = description;
+            }
+            if (!row.HasRange)
+            {
+                object min = key.GetValue("ValueMin");
+                object max = key.GetValue("ValueMax");
+                if (min is int && max is int)
+                {
+                    row.HasRange = true;
+                    row.Min = unchecked((uint)(int)min);
+                    row.Max = unchecked((uint)(int)max);
+                    object inc = key.GetValue("ValueIncrement");
+                    row.Increment = inc is int && (int)inc > 0 ? unchecked((uint)(int)inc) : 1;
+                }
+            }
+        }
+
+        static void ApplyAttributes(RegistryKey key, SettingRow row)
+        {
+            object attr = key.GetValue("Attributes");
+            if (attr is int)
+            {
+                row.AttributesKnown = true;
+                row.Hidden = (((uint)(int)attr) & Native.HideAttribute) != 0;
+            }
+        }
+
+        static void ApplySchemeValue(Guid scheme, Guid group, Guid setting, SettingRow row)
+        {
+            string path = group == Guid.Empty
+                ? SchemeRoot + "\\" + scheme.ToString("D") + "\\" + setting.ToString("D")
+                : SchemeRoot + "\\" + scheme.ToString("D") + "\\" + group.ToString("D") + "\\" + setting.ToString("D");
+            using (RegistryKey key = Registry.LocalMachine.OpenSubKey(path))
+            {
+                if (key == null) return;
+                object ac = key.GetValue("ACSettingIndex");
+                object dc = key.GetValue("DCSettingIndex");
+                if (!row.HasAc && ac is int)
+                {
+                    row.HasAc = true;
+                    row.Ac = unchecked((uint)(int)ac);
+                }
+                if (!row.HasDc && dc is int)
+                {
+                    row.HasDc = true;
+                    row.Dc = unchecked((uint)(int)dc);
+                }
+            }
+        }
+
+        static bool HasIndexValue(RegistryKey key)
+        {
+            return key.GetValue("ACSettingIndex") is int || key.GetValue("DCSettingIndex") is int;
+        }
+
+        static HashSet<string> LoadSchemeValueKeys()
+        {
+            HashSet<string> set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using (RegistryKey schemes = Registry.LocalMachine.OpenSubKey(SchemeRoot))
+            {
+                if (schemes == null) return set;
+                string[] schemeNames = schemes.GetSubKeyNames();
+                for (int i = 0; i < schemeNames.Length; i++)
+                {
+                    Guid schemeId;
+                    if (!TryParseGuid(schemeNames[i], out schemeId) || schemeId == Guid.Empty) continue;
+                    using (RegistryKey scheme = schemes.OpenSubKey(schemeNames[i]))
+                    {
+                        if (scheme == null) continue;
+                        string[] children = scheme.GetSubKeyNames();
+                        for (int c = 0; c < children.Length; c++)
+                        {
+                            Guid childId;
+                            if (!TryParseGuid(children[c], out childId)) continue;
+                            using (RegistryKey child = scheme.OpenSubKey(children[c]))
+                            {
+                                if (child == null) continue;
+                                if (HasIndexValue(child)) set.Add(PairKey(Guid.Empty, childId));
+                                string[] settings = child.GetSubKeyNames();
+                                for (int s = 0; s < settings.Length; s++)
+                                {
+                                    Guid settingId;
+                                    if (!TryParseGuid(settings[s], out settingId)) continue;
+                                    using (RegistryKey setting = child.OpenSubKey(settings[s]))
+                                        if (setting != null && HasIndexValue(setting))
+                                            set.Add(PairKey(childId, settingId));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return set;
+        }
+
+        static string PairKey(Guid group, Guid setting)
+        {
+            return group.ToString("D") + "|" + setting.ToString("D");
+        }
+
+        static void TrySetHidden(RegistryKey parent, string relativePath, ref UnavailableHideResult result)
+        {
+            try
+            {
+                using (RegistryKey key = parent.OpenSubKey(relativePath, true))
+                {
+                    if (key == null)
+                    {
+                        result.AccessDenied = true;
+                        return;
+                    }
+                    if (!NeedsHiddenAttribute(key)) return;
+                    object currentObj = key.GetValue("Attributes");
+                    uint current = currentObj is int ? unchecked((uint)(int)currentObj) : 0;
+                    uint updated = (current & ~2u) | Native.HideAttribute;
+                    key.SetValue("Attributes", unchecked((int)updated), RegistryValueKind.DWord);
+                    result.Hidden++;
+                }
+            }
+            catch (UnauthorizedAccessException) { result.AccessDenied = true; }
+            catch (System.Security.SecurityException) { result.AccessDenied = true; }
         }
 
         static void ReadRegistryChoices(RegistryKey key, SettingRow row)
@@ -2317,6 +2699,8 @@ namespace PowerOptionEditor
                     index++;
                 }
             }
+            if (!row.HasAc || !row.HasDc)
+                ApplySchemeValue(scheme, group, setting, row);
             return row;
         }
 

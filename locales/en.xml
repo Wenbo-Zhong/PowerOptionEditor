@@ -16,6 +16,7 @@
   <string key="constrained">Constrained</string>
   <string key="copied.the.setting.guid">Copied the setting GUID.</string>
   <string key="copy.guid">Copy GUID</string>
+  <string key="could.not.hide.unavailable"> Could not hide power options this computer does not have. Use "Restart as administrator" and refresh.</string>
   <string key="current.unlisted.value">Current unlisted value</string>
   <string key="daily">Daily</string>
   <string key="deepest.sleep.state.allowed">Deepest sleep state allowed.</string>
@@ -42,6 +43,8 @@
   <string key="group">Group</string>
   <string key="hibernate">Hibernate</string>
   <string key="hibernate.timeout.seconds">Hibernate timeout (seconds)</string>
+  <string key="hid.unavailable.prefix"> Hid </string>
+  <string key="hid.unavailable.suffix"> power options this computer does not have.</string>
   <string key="hidden">Hidden</string>
   <string key="hide.in.power.options">Hide in Power Options</string>
   <string key="high.drain">High drain</string>

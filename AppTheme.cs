@@ -58,7 +58,8 @@ namespace PowerOptionEditor
 
         void ApplyControls(Control control)
         {
-            bool input = control is TextBoxBase || control is ComboBox || control is ListView;
+            TextBoxBase editor = control as TextBoxBase;
+            bool input = (editor != null && !editor.ReadOnly) || control is ComboBox || control is ListView;
             control.BackColor = input ? Input : Surface;
             control.ForeColor = input ? InputText : Text;
             Button button = control as Button;
@@ -284,5 +285,28 @@ namespace PowerOptionEditor
     sealed class BufferedListView : ListView
     {
         public BufferedListView() { DoubleBuffered = true; }
+    }
+
+    sealed class SelectableTextBox : TextBox
+    {
+        const int WM_CUT = 0x0300;
+        const int WM_PASTE = 0x0302;
+        const int WM_CLEAR = 0x0303;
+        const int WM_UNDO = 0x0304;
+
+        public SelectableTextBox()
+        {
+            ReadOnly = true;
+            ShortcutsEnabled = true;
+            HideSelection = false;
+            Cursor = Cursors.IBeam;
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WM_CUT || m.Msg == WM_PASTE || m.Msg == WM_CLEAR || m.Msg == WM_UNDO)
+                return;
+            base.WndProc(ref m);
+        }
     }
 }

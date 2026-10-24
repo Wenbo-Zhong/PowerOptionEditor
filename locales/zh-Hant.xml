@@ -16,6 +16,7 @@
   <string key="constrained">受限</string>
   <string key="copied.the.setting.guid">已複製設定 GUID。</string>
   <string key="copy.guid">複製 GUID</string>
+  <string key="could.not.hide.unavailable"> 無法隱藏這部電腦沒有的電源選項。請使用「以系統管理員重新啟動」後重新整理。</string>
   <string key="current.unlisted.value">目前未列出的值</string>
   <string key="daily">日常</string>
   <string key="deepest.sleep.state.allowed">允許進入的最深睡眠狀態。</string>
@@ -42,6 +43,8 @@
   <string key="group">群組</string>
   <string key="hibernate">休眠</string>
   <string key="hibernate.timeout.seconds">休眠逾時（秒）</string>
+  <string key="hid.unavailable.prefix"> 已隱藏 </string>
+  <string key="hid.unavailable.suffix"> 個這部電腦沒有的電源選項。</string>
   <string key="hidden">隱藏</string>
   <string key="hide.in.power.options">在系統電源選項中隱藏</string>
   <string key="high.drain">高耗電</string>
