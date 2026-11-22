@@ -1993,21 +1993,51 @@ namespace PowerOptionEditor
 
         void OpenRegistry()
         {
-            SchemeItem scheme = (SceneMode ? _profileSchemes : _schemes).SelectedItem as SchemeItem;
             SettingRow row = SelectedRow();
-            if (scheme == null || row == null || row.Legacy || scheme.Legacy) return;
-            string sub = row.Subgroup == Guid.Empty ? "" : row.Subgroup.ToString("B") + "\\";
-            string path = @"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes\"
-                + scheme.Guid.ToString("B") + "\\" + sub + row.Setting.ToString("B");
-            if (row.Profile != Guid.Empty) path = "HKEY_LOCAL_MACHINE\\" + ProfileCatalog.Path(row, row.Profile, row.ProfileScheme);
+            SchemeItem scheme = _schemes.SelectedItem as SchemeItem;
+            if (row == null || row.Legacy || (row.Profile == Guid.Empty && (scheme == null || scheme.Legacy))) return;
             try
             {
-                string prefix = Ui.T("computer");
+                string path;
+                bool definition = false;
+                if (row.Profile != Guid.Empty)
+                {
+                    path = ProfileCatalog.Path(row, row.Profile, row.ProfileScheme);
+                }
+                else
+                {
+                    string settingPath = (row.Subgroup == Guid.Empty ? "" : row.Subgroup.ToString("D") + "\\")
+                        + row.Setting.ToString("D");
+                    path = @"SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes\"
+                        + scheme.Guid.ToString("D") + "\\" + settingPath;
+                    using (RegistryKey values = Registry.LocalMachine.OpenSubKey(path))
+                        definition = values == null;
+                    if (definition)
+                        path = @"SYSTEM\CurrentControlSet\Control\Power\PowerSettings\" + settingPath;
+                }
+                using (RegistryKey target = Registry.LocalMachine.OpenSubKey(path))
+                {
+                    if (target == null)
+                    {
+                        Report(Ui.T("registry.key.missing"));
+                        return;
+                    }
+                }
                 using (RegistryKey key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Applets\Regedit"))
                 {
-                    if (key != null) key.SetValue("LastKey", prefix + "\\" + path);
+                    string previous = key.GetValue("LastKey") as string;
+                    string prefix = Ui.T("computer");
+                    if (!string.IsNullOrEmpty(previous))
+                    {
+                        string root = previous.Split('\\')[0];
+                        if (!string.IsNullOrEmpty(root) && root != "." && !root.StartsWith("HKEY_", StringComparison.OrdinalIgnoreCase))
+                            prefix = root;
+                    }
+                    key.SetValue("LastKey", prefix + @"\HKEY_LOCAL_MACHINE\" + path);
                 }
-                Process.Start("regedit.exe");
+                // An existing Regedit window does not reread LastKey.
+                Process.Start(System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "regedit.exe"), "/m");
+                Report(definition ? Ui.T("registry.definition.opened") : "");
             }
             catch (Exception ex) { Report(ex.Message); }
         }

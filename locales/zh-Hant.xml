@@ -77,6 +77,8 @@
   <string key="not.in.the.choice.list">  (不在可選清單中)</string>
   <string key="not.overridden">未覆寫</string>
   <string key="open.registry">開啟登錄編輯器</string>
+  <string key="registry.key.missing">此設定對應的登錄機碼不存在。</string>
+  <string key="registry.definition.opened">此電源計劃尚未儲存覆寫值，已開啟設定定義。</string>
   <string key="plan.root">（配置根設定）</string>
   <string key="power.backup.xml.xml">電源備份 (*.xml)|*.xml</string>
   <string key="power.button">電源按鈕</string>

@@ -77,6 +77,8 @@
   <string key="not.in.the.choice.list">  (not in the choice list)</string>
   <string key="not.overridden">Not overridden</string>
   <string key="open.registry">Open Registry</string>
+  <string key="registry.key.missing">The registry key for this setting does not exist.</string>
+  <string key="registry.definition.opened">This plan has no stored override. Opened the setting definition.</string>
   <string key="plan.root">(Plan root)</string>
   <string key="power.backup.xml.xml">Power backup (*.xml)|*.xml</string>
   <string key="power.button">Power button</string>

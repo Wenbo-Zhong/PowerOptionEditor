@@ -77,6 +77,8 @@
   <string key="not.in.the.choice.list">  (不在可选列表中)</string>
   <string key="not.overridden">未覆盖</string>
   <string key="open.registry">打开注册表</string>
+  <string key="registry.key.missing">此设置对应的注册表项不存在。</string>
+  <string key="registry.definition.opened">此方案尚未保存覆盖值，已打开设置定义。</string>
   <string key="plan.root">（方案根设置）</string>
   <string key="power.backup.xml.xml">电源备份 (*.xml)|*.xml</string>
   <string key="power.button">电源按钮</string>
