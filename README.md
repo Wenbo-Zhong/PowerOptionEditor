@@ -29,6 +29,33 @@ C:\Windows\Microsoft.NET\Framework64\v4.0.30319\MSBuild.exe PowerOptionEditor.sl
 
 输出位于 `bin\Release\` 或 `bin\Debug\`。部署时只需复制 `PowerOptionEditor.exe`；PDB 仅用于调试，不需要额外的 `.exe.config` 文件。目标电脑仍需安装 .NET Framework 4.0 完整版或兼容的更新版本。构建脚本使用自身目录定位工程，可以从其他工作目录调用。
 
+## 目录与源码导航
+
+```text
+PowerOptionEditor/
+├── PowerOptionEditor.sln / PowerOptionEditor.csproj
+├── build.ps1 / app.manifest
+├── src/
+│   ├── Program.cs
+│   ├── UI/
+│   ├── Power/
+│   ├── Profiles/
+│   └── Platform/
+├── locales/
+├── scripts/
+└── docs/
+    └── reviews/
+```
+
+- [`src/Program.cs`](src/Program.cs)：启动入口及 `/dump` 诊断。
+- [`src/UI/`](src/UI/)：`MainForm.cs` 负责筛选和编辑操作，`MainForm.Catalog.cs` 负责后台目录读取、缓存与场景切换，`MainForm.Layout.cs` 负责控件初始化、布局与主题事件；`AppTheme.cs`、`Ui.cs` 提供主题控件与翻译加载。
+- [`src/Power/`](src/Power/)：`PowerCatalog.cs` 提供电源读写入口，`PowerCatalog.Registry.cs` 补充注册表目录、默认值和不可用选项处理，`LegacyCatalog.cs` 保留 Server 2003 接口；`PowerModels.cs` 定义方案与设置数据，`PlanFile.cs` 处理 XML 导入、导出。
+- [`src/Profiles/`](src/Profiles/)：`ProfileDefinitions.cs` 定义已知场景的 GUID、翻译键和默认优先级，`ProfileCatalog.cs` 读取本机场景目录及覆盖值。本机 `Profile\Events` 的优先级优先于默认定义。
+- [`src/Platform/`](src/Platform/)：`Dpi.cs` 处理 DPI 适配，`NativeMethods.cs` 集中 Windows 接口声明及原生结构布局。
+- [`locales/`](locales/)：界面与场景翻译；[`scripts/`](scripts/)：校验工具；[`docs/reviews/`](docs/reviews/)：历史提交的评审记录。
+
+新增 C# 文件时，需要在根目录的 `PowerOptionEditor.csproj` 中加入相应的 `Compile` 条目。翻译校验递归扫描 `src/` 下的所有 C# 文件。
+
 ## 最低运行环境
 
 **Windows Server 2003 SP2 x64，安装 .NET Framework 4.0 完整版（包含 x64 CLR）**。不包括未安装 SP2 的 Server 2003。微软的 [.NET Framework 4 系统要求](https://www.microsoft.com/en-us/download/details.aspx?id=17851)列出了 Server 2003 SP2。

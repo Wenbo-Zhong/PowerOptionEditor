@@ -27,8 +27,10 @@ def main():
     if not english or any(not text for text in english.values()):
         raise ValueError("en.xml: reference translations must not be empty")
     references = set()
-    for source in ROOT.glob("*.cs"):
-        references.update(re.findall(r'\b(?:Ui\.)?T\("([^"]+)"\)', source.read_text(encoding="utf-8-sig")))
+    for source in (ROOT / "src").rglob("*.cs"):
+        text = source.read_text(encoding="utf-8-sig")
+        references.update(re.findall(r'\b(?:Ui\.)?T\("([^"]+)"\)', text))
+        references.update(re.findall(r'\bnew ProfileDefinition\("[^"]+",\s*"([^"]+)"', text))
     if references - english.keys():
         raise ValueError(f"Missing English keys: {sorted(references - english.keys())}")
     for path in sorted((ROOT / "locales").glob("*.xml")):

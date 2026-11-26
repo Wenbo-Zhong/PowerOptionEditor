@@ -6,6 +6,8 @@ bin/
 .agents/
 obj/
 .vs/
+.DS_Store
+.trae-html-share-packages/
 *.user
 *.suo
 PowerOptionEditor.exe

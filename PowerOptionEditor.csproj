@@ -29,10 +29,27 @@
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
-    <Compile Include="Program.cs" />
-    <Compile Include="Ui.cs" />
-    <Compile Include="AppTheme.cs" />
-    <Compile Include="ProfileCatalog.cs" />
+    <Compile Include="src\Program.cs" />
+    <Compile Include="src\UI\MainForm.cs" />
+    <Compile Include="src\UI\MainForm.Catalog.cs">
+      <DependentUpon>MainForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="src\UI\MainForm.Layout.cs">
+      <DependentUpon>MainForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="src\UI\AppTheme.cs" />
+    <Compile Include="src\UI\Ui.cs" />
+    <Compile Include="src\Power\PowerCatalog.cs" />
+    <Compile Include="src\Power\PowerCatalog.Registry.cs">
+      <DependentUpon>PowerCatalog.cs</DependentUpon>
+    </Compile>
+    <Compile Include="src\Power\LegacyCatalog.cs" />
+    <Compile Include="src\Power\PowerModels.cs" />
+    <Compile Include="src\Power\PlanFile.cs" />
+    <Compile Include="src\Profiles\ProfileCatalog.cs" />
+    <Compile Include="src\Profiles\ProfileDefinitions.cs" />
+    <Compile Include="src\Platform\Dpi.cs" />
+    <Compile Include="src\Platform\NativeMethods.cs" />
     <EmbeddedResource Include="locales\*.xml">
       <LogicalName>PowerOptionEditor.Locales.%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>

@@ -120,7 +120,6 @@
   <string key="the.active.power.plan.was.changed">已切换当前电源方案。</string>
   <string key="these.fields.come.from.the.windows.server.2003.power.scheme"> 这些项目来自 Windows Server 2003 时代的电源方案结构。</string>
   <string key="this.system.has.no.power.interface.from.vista.onward.so.legacy.schemes"> 当前系统没有 Vista 之后的电源接口，正在使用旧式电源方案。</string>
-  <string key="this.value.is.not.a.dword.it.is.shown.but.cannot.be.written.here"> 此设置的数值类型不是 DWORD，界面只显示说明，不写入。</string>
   <string key="throttle.before.fan">风扇前最低节流（%）</string>
   <string key="turn.off.display.seconds">显示器关闭（秒）</string>
   <string key="turn.off.hard.disk.seconds">硬盘关闭（秒）</string>

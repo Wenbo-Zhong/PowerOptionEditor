@@ -120,7 +120,6 @@ Scenario override; missing values use daily settings. Changes take effect on the
   <string key="the.active.power.plan.was.changed">The active power plan was changed.</string>
   <string key="these.fields.come.from.the.windows.server.2003.power.scheme"> These fields come from the Windows Server 2003 power scheme.</string>
   <string key="this.system.has.no.power.interface.from.vista.onward.so.legacy.schemes"> This system has no power interface from Vista onward, so legacy schemes are used.</string>
-  <string key="this.value.is.not.a.dword.it.is.shown.but.cannot.be.written.here"> This value is not a DWORD. It is shown but cannot be written here.</string>
   <string key="throttle.before.fan">Throttle before fan (%)</string>
   <string key="turn.off.display.seconds">Turn off display (seconds)</string>
   <string key="turn.off.hard.disk.seconds">Turn off hard disk (seconds)</string>
