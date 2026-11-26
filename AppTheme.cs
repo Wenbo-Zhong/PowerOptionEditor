@@ -125,12 +125,14 @@ namespace PowerOptionEditor
 
         void DrawHeader(object sender, DrawListViewColumnHeaderEventArgs e)
         {
-            using (SolidBrush brush = new SolidBrush(Color.FromArgb(52, 57, 64))) e.Graphics.FillRectangle(brush, e.Bounds);
+            ListView list = (ListView)sender;
+            using (SolidBrush brush = new SolidBrush(BufferedListView.DarkHeaderColor))
+                e.Graphics.FillRectangle(brush, e.Bounds);
             using (Pen pen = new Pen(Color.FromArgb(90, 97, 107)))
                 e.Graphics.DrawRectangle(pen, e.Bounds.X, e.Bounds.Y, Math.Max(0, e.Bounds.Width - 1), Math.Max(0, e.Bounds.Height - 1));
             Rectangle text = e.Bounds;
             text.Inflate(-4, 0);
-            TextRenderer.DrawText(e.Graphics, e.Header.Text, ((ListView)sender).Font, text, Text,
+            TextRenderer.DrawText(e.Graphics, e.Header.Text, list.Font, text, Text,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
         }
 
@@ -284,7 +286,79 @@ namespace PowerOptionEditor
 
     sealed class BufferedListView : ListView
     {
+        internal static readonly Color DarkHeaderColor = Color.FromArgb(52, 57, 64);
+
         public BufferedListView() { DoubleBuffered = true; }
+
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            const int WM_NOTIFY = 0x004E;
+            const int NM_CUSTOMDRAW = -12;
+            const int CDDS_PREPAINT = 1;
+            const int CDDS_POSTPAINT = 2;
+            const int CDRF_NOTIFYPOSTPAINT = 0x10;
+            const int LVM_GETHEADER = 0x101F;
+
+            if (m.Msg != WM_NOTIFY || m.LParam == IntPtr.Zero || !OwnerDraw || View != View.Details) return;
+            CustomDraw draw = (CustomDraw)Marshal.PtrToStructure(m.LParam, typeof(CustomDraw));
+            if (draw.Header.Code != NM_CUSTOMDRAW ||
+                draw.Header.From != SendMessage(Handle, LVM_GETHEADER, IntPtr.Zero, IntPtr.Zero)) return;
+
+            if (draw.Stage == CDDS_PREPAINT)
+                m.Result = new IntPtr(m.Result.ToInt64() | CDRF_NOTIFYPOSTPAINT);
+            else if (draw.Stage == CDDS_POSTPAINT)
+                PaintHeaderRemainder(draw.Header.From, draw.Hdc);
+        }
+
+        void PaintHeaderRemainder(IntPtr header, IntPtr hdc)
+        {
+            const int HDM_GETITEMRECT = 0x1207;
+            NativeRect client;
+            if (hdc == IntPtr.Zero || !GetClientRect(header, out client)) return;
+            int right = client.Left;
+            for (int i = 0; i < Columns.Count; i++)
+            {
+                NativeRect item;
+                if (SendMessage(header, HDM_GETITEMRECT, new IntPtr(i), out item) != IntPtr.Zero)
+                    right = Math.Max(right, item.Right);
+            }
+            if (right >= client.Right) return;
+            using (Graphics graphics = Graphics.FromHdc(hdc))
+            using (SolidBrush brush = new SolidBrush(DarkHeaderColor))
+                graphics.FillRectangle(brush, Rectangle.FromLTRB(right, client.Top, client.Right, client.Bottom));
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct NotifyHeader
+        {
+            public IntPtr From;
+            public IntPtr Id;
+            public int Code;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct CustomDraw
+        {
+            public NotifyHeader Header;
+            public int Stage;
+            public IntPtr Hdc;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct NativeRect
+        {
+            public int Left, Top, Right, Bottom;
+        }
+
+        [DllImport("user32.dll")]
+        static extern bool GetClientRect(IntPtr window, out NativeRect rect);
+
+        [DllImport("user32.dll")]
+        static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, out NativeRect lParam);
     }
 
     sealed class SelectableTextBox : TextBox

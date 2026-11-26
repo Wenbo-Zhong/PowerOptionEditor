@@ -71,6 +71,8 @@
   <string key="multimedia.qos">多媒體</string>
   <string key="no">否</string>
   <string key="no.pending.changes">沒有待寫入的修改</string>
+  <string key="loading.power.plans">正在讀取電源配置…</string>
+  <string key="loading.settings">正在讀取設定…</string>
   <string key="no.power.plans.were.found">沒有讀到電源配置。</string>
   <string key="no.predefined.choices.edit.the.raw.value">    沒有預先定義的可選值，請直接編輯原始數值</string>
   <string key="none">無操作</string>

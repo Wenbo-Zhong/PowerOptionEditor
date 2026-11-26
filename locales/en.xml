@@ -71,6 +71,8 @@
   <string key="multimedia.qos">Multimedia QoS</string>
   <string key="no">No</string>
   <string key="no.pending.changes">No pending changes</string>
+  <string key="loading.power.plans">Loading power plans…</string>
+  <string key="loading.settings">Loading settings…</string>
   <string key="no.power.plans.were.found">No power plans were found.</string>
   <string key="no.predefined.choices.edit.the.raw.value">    No predefined choices. Edit the raw value.</string>
   <string key="none">None</string>

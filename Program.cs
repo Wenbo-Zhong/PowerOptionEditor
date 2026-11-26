@@ -14,6 +14,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
@@ -989,12 +990,12 @@ namespace PowerOptionEditor
         readonly Label _status = new Label();
         readonly Label _pending = new Label();
         readonly List<SettingRow> _rows = new List<SettingRow>();
-        List<SettingRow> _processorTemplates;
         readonly Dictionary<string, List<SettingRow>> _dailyCache = new Dictionary<string, List<SettingRow>>();
         readonly Dictionary<string, int[]> _columnWidths = new Dictionary<string, int[]>();
         readonly Dictionary<string, GridPosition> _gridPositions = new Dictionary<string, GridPosition>();
         string _boundViewKey;
         bool _profilesLoaded;
+        bool _catalogLoading;
         bool _layoutQueued;
 
         sealed class GridPosition
@@ -1049,7 +1050,7 @@ namespace PowerOptionEditor
             // container would also disable every daily setting inside it.
             _mode.Selecting += delegate(object sender, TabControlCancelEventArgs e)
             {
-                if (e.TabPageIndex == 1 && !FixedCatalog.Modern) e.Cancel = true;
+                if (_catalogLoading || (e.TabPageIndex == 1 && !FixedCatalog.Modern)) e.Cancel = true;
                 else SaveGridPosition();
             };
             _mode.SelectedIndexChanged += delegate { ReloadProfiles(); };
@@ -1077,7 +1078,7 @@ namespace PowerOptionEditor
             AddBar(activate);
 
             Button refresh = MakeButton(Ui.T("refresh"));
-            refresh.Click += delegate { ReloadSchemes(true); if (SceneMode) ReloadProfiles(); };
+            refresh.Click += delegate { ReloadSchemes(true); };
             AddBar(refresh);
 
             AddBar(MakeLabel(Ui.T("search")));
@@ -1240,7 +1241,15 @@ namespace PowerOptionEditor
                 }
             };
 
-            Shown += delegate { RefreshTheme(); ArrangeBar(); ArrangeEditors(); ArrangeActions(); ReloadSchemes(false); };
+            Load += delegate
+            {
+                RefreshTheme();
+                ArrangeBar();
+                ArrangeEditors();
+                ArrangeActions();
+                Report(Ui.T("loading.power.plans"));
+            };
+            Shown += delegate { ReloadSchemes(false); };
         }
 
         void SaveGridPosition()
@@ -1423,7 +1432,7 @@ namespace PowerOptionEditor
             _grid.Columns.Add(header);
         }
 
-        void FitColumns()
+        void FitColumns(ListViewItem[] items)
         {
             string key = (_boundViewKey ?? "") + "|" + _search.Text;
             int[] cached;
@@ -1438,10 +1447,13 @@ namespace PowerOptionEditor
             {
                 if (SceneMode && c >= 4 && c <= 6) { _grid.Columns[c].Width = 0; continue; }
                 int width = TextRenderer.MeasureText(_grid.Columns[c].Text, _grid.Font).Width + pad;
-                for (int i = 0; i < _grid.Items.Count; i++)
+                HashSet<string> measured = new HashSet<string>(StringComparer.Ordinal);
+                measured.Add(_grid.Columns[c].Text);
+                foreach (ListViewItem item in items)
                 {
-                    if (c >= _grid.Items[i].SubItems.Count) continue;
-                    int itemWidth = TextRenderer.MeasureText(_grid.Items[i].SubItems[c].Text, _grid.Font).Width + pad;
+                    string text = item.SubItems[c].Text;
+                    if (!measured.Add(text)) continue;
+                    int itemWidth = TextRenderer.MeasureText(text, _grid.Font).Width + pad;
                     if (itemWidth > width) width = itemWidth;
                 }
                 _grid.Columns[c].Width = width;
@@ -1450,45 +1462,74 @@ namespace PowerOptionEditor
             _columnWidths[key] = widths;
         }
 
-        void ReloadSchemes(bool keep)
+        void RunCatalogRead<T>(string loadingMessage, Func<T> read, Action<T> show)
         {
-            _processorTemplates = null;
+            _catalogLoading = true;
+            _bar.Enabled = _editorRow.Enabled = _actionRow.Enabled = false;
+            Report(loadingMessage);
+
+            // The worker reads the catalog. Completion runs on the WinForms thread.
+            BackgroundWorker worker = new BackgroundWorker();
+            CultureInfo culture = CultureInfo.CurrentCulture;
+            worker.DoWork += delegate(object sender, DoWorkEventArgs e)
+            {
+                System.Threading.Thread thread = System.Threading.Thread.CurrentThread;
+                CultureInfo previous = thread.CurrentCulture;
+                try
+                {
+                    thread.CurrentCulture = culture;
+                    e.Result = read();
+                }
+                finally { thread.CurrentCulture = previous; }
+            };
+            worker.RunWorkerCompleted += delegate(object sender, RunWorkerCompletedEventArgs e)
+            {
+                worker.Dispose();
+                if (IsDisposed || Disposing) return;
+                _catalogLoading = false;
+                _bar.Enabled = _editorRow.Enabled = _actionRow.Enabled = true;
+                if (e.Error != null) { Report(e.Error.Message); return; }
+                try { show((T)e.Result); }
+                catch (Exception ex) { Report(ex.Message); }
+            };
+            worker.RunWorkerAsync();
+        }
+
+        void InvalidateCatalog()
+        {
             _dailyCache.Clear();
             _columnWidths.Clear();
+        }
+
+        void ReloadSchemes(bool keep)
+        {
+            InvalidateCatalog();
             _profilesLoaded = false;
-            Guid previous = Guid.Empty;
-            uint legacy = 0;
-            bool wasLegacy = false;
-            SchemeItem selected = _schemes.SelectedItem as SchemeItem;
-            if (selected != null)
+            SchemeItem previous = keep ? _schemes.SelectedItem as SchemeItem : null;
+            RunCatalogRead(Ui.T("loading.power.plans"), FixedCatalog.LoadSchemes, schemes =>
             {
-                previous = selected.Guid;
-                legacy = selected.LegacyIndex;
-                wasLegacy = selected.Legacy;
-            }
-            List<SchemeItem> schemes;
-            try { schemes = FixedCatalog.LoadSchemes(); }
-            catch (Exception ex)
-            {
-                Report(ex.Message);
-                return;
-            }
-            _filling = true;
-            _schemes.Items.Clear();
-            int index = 0;
-            for (int i = 0; i < schemes.Count; i++)
-            {
-                _schemes.Items.Add(schemes[i]);
-                if (schemes[i].Active) index = i;
-                if (keep && wasLegacy == schemes[i].Legacy && ((wasLegacy && schemes[i].LegacyIndex == legacy) || (!wasLegacy && schemes[i].Guid == previous)))
-                    index = i;
-            }
-            _filling = false;
-            if (_schemes.Items.Count > 0) _schemes.SelectedIndex = index;
-            else Report(Ui.T("no.power.plans.were.found"));
-            Text = FixedCatalog.Modern
-                ? Ui.Title
-                : Ui.Title + Ui.T("legacy.power.schemes.windows.server.2003");
+                int index = 0;
+                for (int i = 0; i < schemes.Count; i++)
+                    if (schemes[i].Active) index = i;
+                if (previous != null)
+                {
+                    int match = schemes.FindIndex(item => item.Legacy == previous.Legacy
+                        && (item.Legacy ? item.LegacyIndex == previous.LegacyIndex : item.Guid == previous.Guid));
+                    if (match >= 0) index = match;
+                }
+
+                _filling = true;
+                try
+                {
+                    _schemes.Items.Clear();
+                    _schemes.Items.AddRange(schemes.ToArray());
+                    if (schemes.Count > 0) _schemes.SelectedIndex = index;
+                }
+                finally { _filling = false; }
+
+                if (SceneMode) ReloadProfiles();
+                else ReloadSettings(schemes.Count == 0 ? Ui.T("no.power.plans.were.found") : null);
+            });
         }
 
         void ReloadProfiles()
@@ -1500,101 +1541,151 @@ namespace PowerOptionEditor
             _pageContent.ResumeLayout(true);
             QueueLayoutRepair();
             if (!SceneMode) { ReloadSettings(); return; }
+            ClearSettings();
             if (_profilesLoaded) { ReloadProfileSchemes(); return; }
-            try
+
+            ProfileItem previous = _profiles.SelectedItem as ProfileItem;
+            RunCatalogRead(Ui.T("loading.settings"), () =>
             {
-                Guid previous = _profiles.SelectedItem is ProfileItem ? ((ProfileItem)_profiles.SelectedItem).Guid : Guid.Empty;
+                List<ProfileItem> profiles = ProfileCatalog.LoadProfiles();
+                return profiles.FindAll(ProfileCatalog.HasAdjustableTargets);
+            }, profiles =>
+            {
                 _filling = true;
-                _profiles.Items.Clear();
-                foreach (ProfileItem profile in ProfileCatalog.LoadProfiles())
-                    if (ProfileCatalog.HasAdjustableTargets(profile)) _profiles.Items.Add(profile);
-                int selected = 0;
-                for (int i = 0; i < _profiles.Items.Count; i++)
-                    if (((ProfileItem)_profiles.Items[i]).Guid == previous) selected = i;
-                if (_profiles.Items.Count > 0) _profiles.SelectedIndex = selected;
-                _profilesLoaded = true;
-            }
-            catch (Exception ex) { Report(ex.Message); }
-            finally { _filling = false; }
-            ReloadProfileSchemes();
+                try
+                {
+                    _profiles.Items.Clear();
+                    _profiles.Items.AddRange(profiles.ToArray());
+                    int selected = previous == null ? -1 : profiles.FindIndex(item => item.Guid == previous.Guid);
+                    if (profiles.Count > 0) _profiles.SelectedIndex = Math.Max(0, selected);
+                    _profilesLoaded = true;
+                }
+                finally { _filling = false; }
+                ReloadProfileSchemes();
+            });
         }
 
         void ReloadProfileSchemes()
         {
-            if (_filling || !SceneMode) return;
+            if (_filling || _catalogLoading || !SceneMode) return;
+            SaveGridPosition();
+            ClearSettings();
             ProfileItem profile = _profiles.SelectedItem as ProfileItem;
             SchemeItem daily = _schemes.SelectedItem as SchemeItem;
-            SchemeItem previous = _profileSchemes.SelectedItem as SchemeItem;
-            try
+            SchemeItem previous = _profileSchemes.SelectedItem as SchemeItem ?? daily;
+            List<SchemeItem> known = new List<SchemeItem>();
+            foreach (SchemeItem item in _schemes.Items) known.Add(item);
+
+            RunCatalogRead(Ui.T("loading.settings"), () => profile == null
+                ? new List<SchemeItem>() : ProfileCatalog.LoadSchemes(profile, daily, known), schemes =>
             {
                 _filling = true;
-                _profileSchemes.Items.Clear();
-                if (profile != null) foreach (SchemeItem scheme in ProfileCatalog.LoadSchemes(profile, daily)) _profileSchemes.Items.Add(scheme);
-                int selected = 0;
-                for (int i = 0; i < _profileSchemes.Items.Count; i++)
-                    if (((SchemeItem)_profileSchemes.Items[i]).Guid == (previous != null ? previous.Guid : daily != null ? daily.Guid : Guid.Empty)) selected = i;
-                if (_profileSchemes.Items.Count > 0) _profileSchemes.SelectedIndex = selected;
-            }
-            catch (Exception ex) { Report(ex.Message); }
-            finally { _filling = false; }
-            ReloadSettings();
+                try
+                {
+                    _profileSchemes.Items.Clear();
+                    _profileSchemes.Items.AddRange(schemes.ToArray());
+                    int selected = previous == null ? -1 : schemes.FindIndex(item => item.Guid == previous.Guid);
+                    if (schemes.Count > 0) _profileSchemes.SelectedIndex = Math.Max(0, selected);
+                }
+                finally { _filling = false; }
+                ReloadSettings();
+            });
         }
 
-        void ReloadSettings()
+        sealed class LoadedSettings
         {
-            if (_filling) return;
+            public List<SettingRow> Catalog;
+            public List<SettingRow> Rows;
+            public List<string> Unavailable;
+        }
+
+        void ClearSettings()
+        {
+            _boundViewKey = null;
+            _rows.Clear();
+            _filling = true;
+            try { _grid.Items.Clear(); }
+            finally { _filling = false; }
+            ShowSelected();
+        }
+
+        void ReloadSettings(string completionMessage = null)
+        {
+            if (_filling || _catalogLoading) return;
+            SaveGridPosition();
+            ClearSettings();
+
             SchemeItem scheme = _schemes.SelectedItem as SchemeItem;
-            UseWaitCursor = true;
-            FixedCatalog.UnavailableHideResult hidden = new FixedCatalog.UnavailableHideResult();
-            try
+            bool scene = SceneMode;
+            ProfileItem profile = scene ? _profiles.SelectedItem as ProfileItem : null;
+            if (scheme == null || (scene && profile == null))
             {
-                SaveGridPosition();
-                _rows.Clear();
-                _boundViewKey = null;
-                if (scheme != null)
+                ShowLoadedSettings(null, new List<SettingRow>(), completionMessage, "");
+                return;
+            }
+
+            string dailyKey = "daily:" + (scheme.Legacy
+                ? scheme.LegacyIndex.ToString(CultureInfo.InvariantCulture) : scheme.Guid.ToString());
+            string viewKey = scene ? "profile:" + profile.Guid.ToString() : dailyKey;
+            List<SettingRow> cached;
+            _dailyCache.TryGetValue(dailyKey, out cached);
+            if (!scene && cached != null)
+            {
+                ShowLoadedSettings(viewKey, cached, completionMessage, "");
+                return;
+            }
+
+            List<SchemeItem> targets = new List<SchemeItem>();
+            if (scene)
+                foreach (SchemeItem target in _profileSchemes.Items) targets.Add(target);
+
+            RunCatalogRead(Ui.T("loading.settings"), () =>
+            {
+                LoadedSettings result = new LoadedSettings();
+                result.Catalog = cached ?? FixedCatalog.LoadSettings(scheme);
+                if (cached == null && !scheme.Legacy)
+                    result.Unavailable = FixedCatalog.FindUnavailable(scheme.Guid, result.Catalog);
+                result.Rows = result.Catalog;
+                if (scene)
                 {
-                    ProfileItem profile = _profiles.SelectedItem as ProfileItem;
-                    if (SceneMode && profile != null)
+                    result.Rows = new List<SettingRow>();
+                    List<SettingRow> templates = result.Catalog.FindAll(row => row.Subgroup == ProfileCatalog.Processor);
+                    foreach (SchemeItem target in targets)
                     {
-                        _boundViewKey = "profile:" + profile.Guid.ToString();
-                        List<SettingRow> catalog = FixedCatalog.LoadSettings(scheme);
-                        if (!scheme.Legacy)
-                            hidden = FixedCatalog.HideUnavailable(scheme.Guid, catalog);
-                        if (_processorTemplates == null) CacheProcessorTemplates(catalog);
-                        foreach (SchemeItem target in _profileSchemes.Items)
+                        foreach (SettingRow row in ProfileCatalog.LoadSettings(profile, target, templates))
                         {
-                            List<SettingRow> overrides = ProfileCatalog.LoadSettings(profile, target, _processorTemplates);
-                            foreach (SettingRow row in overrides)
-                            {
-                                if (!row.HasAc && !row.HasDc) continue;
-                                row.ProfileScheme = target.Guid;
-                                if (_profileSchemes.Items.Count > 1) row.GroupName += " — " + target.Name;
-                                _rows.Add(row);
-                            }
+                            if (!row.HasAc && !row.HasDc) continue;
+                            row.ProfileScheme = target.Guid;
+                            if (targets.Count > 1) row.GroupName += " — " + target.Name;
+                            result.Rows.Add(row);
                         }
-                    }
-                    else if (!SceneMode)
-                    {
-                        _boundViewKey = "daily:" + (scheme.Legacy ? scheme.LegacyIndex.ToString(CultureInfo.InvariantCulture) : scheme.Guid.ToString());
-                        List<SettingRow> cached;
-                        if (!_dailyCache.TryGetValue(_boundViewKey, out cached))
-                        {
-                            cached = FixedCatalog.LoadSettings(scheme);
-                            _dailyCache[_boundViewKey] = cached;
-                        }
-                        _rows.AddRange(cached);
-                        CacheProcessorTemplates(_rows);
-                        if (!scheme.Legacy)
-                            hidden = FixedCatalog.HideUnavailable(scheme.Guid, cached);
                     }
                 }
-                BindGrid();
-                Report(Ui.T("loaded") + _rows.Count.ToString(CultureInfo.InvariantCulture) + Ui.T("settings")
-                    + (FixedCatalog.Modern ? "" : Ui.T("this.system.has.no.power.interface.from.vista.onward.so.legacy.schemes"))
-                    + HideUnavailableText(hidden));
-            }
-            catch (Exception ex) { Report(ex.Message); }
-            finally { UseWaitCursor = false; }
+                return result;
+            }, result =>
+            {
+                string hideStatus = result.Unavailable == null ? ""
+                    : HideUnavailableText(FixedCatalog.HideUnavailable(result.Unavailable));
+                _dailyCache[dailyKey] = result.Catalog;
+                if (scene)
+                {
+                    // Overrides are read live and may have changed outside the editor.
+                    string prefix = viewKey + "|";
+                    foreach (string key in new List<string>(_columnWidths.Keys))
+                        if (key.StartsWith(prefix, StringComparison.Ordinal)) _columnWidths.Remove(key);
+                }
+                ShowLoadedSettings(viewKey, result.Rows, completionMessage, hideStatus);
+            });
+        }
+
+        void ShowLoadedSettings(string viewKey, List<SettingRow> rows, string completionMessage, string hideStatus)
+        {
+            _boundViewKey = viewKey;
+            _rows.AddRange(rows);
+            BindGrid();
+            Report(completionMessage ?? (Ui.T("loaded") + _rows.Count.ToString(CultureInfo.InvariantCulture) + Ui.T("settings")
+                + (FixedCatalog.Modern ? "" : Ui.T("this.system.has.no.power.interface.from.vista.onward.so.legacy.schemes"))
+                + hideStatus));
         }
 
         static string HideUnavailableText(FixedCatalog.UnavailableHideResult hidden)
@@ -1605,13 +1696,6 @@ namespace PowerOptionEditor
             if (hidden.AccessDenied)
                 text += Ui.T("could.not.hide.unavailable");
             return text;
-        }
-
-        void CacheProcessorTemplates(List<SettingRow> rows)
-        {
-            _processorTemplates = new List<SettingRow>();
-            foreach (SettingRow row in rows)
-                if (row.Subgroup == ProfileCatalog.Processor) _processorTemplates.Add(row.CopyForProfile());
         }
 
         void BindGrid()
@@ -1635,6 +1719,7 @@ namespace PowerOptionEditor
             try
             {
                 _grid.Items.Clear();
+                ListViewItem[] items = new ListViewItem[view.Count];
                 for (int i = 0; i < view.Count; i++)
                 {
                     SettingRow row = view[i];
@@ -1648,9 +1733,10 @@ namespace PowerOptionEditor
                     item.SubItems.Add(row.Units ?? "");
                     item.ToolTipText = row.Description ?? "";
                     item.Tag = row;
-                    _grid.Items.Add(item);
+                    items[i] = item;
                 }
-                FitColumns();
+                _grid.Items.AddRange(items);
+                FitColumns(items);
                 int selectedIndex = 0;
                 if (_boundViewKey != null && _gridPositions.TryGetValue(_boundViewKey, out position))
                 {
@@ -1823,11 +1909,8 @@ namespace PowerOptionEditor
                     if (rc == Native.Ok) changed++;
                     else { failed++; if (firstError == Native.Ok) firstError = rc; }
                 }
-                _dailyCache.Clear();
-                _columnWidths.Clear();
-                _processorTemplates = null;
-                ReloadSettings();
-                Report(Ui.T("unhidden") + changed.ToString(CultureInfo.InvariantCulture)
+                InvalidateCatalog();
+                ReloadSettings(Ui.T("unhidden") + changed.ToString(CultureInfo.InvariantCulture)
                     + Ui.T("failed") + failed.ToString(CultureInfo.InvariantCulture)
                     + (failed > 0 ? ". " + Explain(firstError) : ""));
             }
@@ -1861,6 +1944,7 @@ namespace PowerOptionEditor
                 Report(Ui.T("value.is.outside.the.range.or.does.not.match.the.increment"));
                 return;
             }
+            InvalidateCatalog();
             uint rc = Native.Ok;
             if (row.HasAc) rc = FixedCatalog.WriteIndex(scheme, row, true, ac);
             if (rc == Native.Ok && row.HasDc) rc = FixedCatalog.WriteIndex(scheme, row, false, dc);
@@ -1962,14 +2046,11 @@ namespace PowerOptionEditor
                 int skipped;
                 uint error;
                 int failed = PlanFile.Import(dialog.FileName, out written, out skipped, out error);
-                _dailyCache.Clear();
-                _columnWidths.Clear();
-                _processorTemplates = null;
-                ReloadSettings();
+                InvalidateCatalog();
                 if (error != Native.Ok)
-                    Report(Ui.T("import.stopped") + Explain(error));
+                    ReloadSettings(Ui.T("import.stopped") + Explain(error));
                 else
-                    Report(Ui.T("imported.wrote")
+                    ReloadSettings(Ui.T("imported.wrote")
                         + written.ToString(CultureInfo.InvariantCulture)
                         + Ui.T("skipped")
                         + skipped.ToString(CultureInfo.InvariantCulture)
@@ -2203,11 +2284,10 @@ namespace PowerOptionEditor
         /// <summary>
         /// Settings the power service does not expose, and that have no registry
         /// name, range, choices, defaults, or scheme value, are not on this machine.
-        /// Mark those keys hidden so Power Options does not list them.
+        /// Collect candidates without changing power settings.
         /// </summary>
-        public static UnavailableHideResult HideUnavailable(Guid scheme, List<SettingRow> present)
+        public static List<string> FindUnavailable(Guid scheme, List<SettingRow> present)
         {
-            UnavailableHideResult result = new UnavailableHideResult();
             HashSet<string> keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             HashSet<string> groupsWithSettings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (present != null)
@@ -2229,7 +2309,7 @@ namespace PowerOptionEditor
             List<string> pending = new List<string>();
             using (RegistryKey readRoot = Registry.LocalMachine.OpenSubKey(PowerRoot))
             {
-                if (readRoot == null) return result;
+                if (readRoot == null) return pending;
                 string[] groupNames = readRoot.GetSubKeyNames();
                 for (int g = 0; g < groupNames.Length; g++)
                 {
@@ -2274,17 +2354,28 @@ namespace PowerOptionEditor
                     }
                 }
             }
+            return pending;
+        }
+
+        public static UnavailableHideResult HideUnavailable(List<string> pending)
+        {
+            UnavailableHideResult result = new UnavailableHideResult();
             if (pending.Count == 0) return result;
-            using (RegistryKey writeRoot = Registry.LocalMachine.OpenSubKey(PowerRoot, true))
+            try
             {
-                if (writeRoot == null)
+                using (RegistryKey writeRoot = Registry.LocalMachine.OpenSubKey(PowerRoot, true))
                 {
-                    result.AccessDenied = true;
-                    return result;
+                    if (writeRoot == null)
+                    {
+                        result.AccessDenied = true;
+                        return result;
+                    }
+                    for (int i = 0; i < pending.Count; i++)
+                        TrySetHidden(writeRoot, pending[i], ref result);
                 }
-                for (int i = 0; i < pending.Count; i++)
-                    TrySetHidden(writeRoot, pending[i], ref result);
             }
+            catch (UnauthorizedAccessException) { result.AccessDenied = true; }
+            catch (System.Security.SecurityException) { result.AccessDenied = true; }
             return result;
         }
 

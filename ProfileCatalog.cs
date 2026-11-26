@@ -83,10 +83,9 @@ namespace PowerOptionEditor
             return Root + Processor.ToString("D") + "\\" + row.Setting.ToString("D") + "\\" + profile.ToString("D") + "\\" + scheme.ToString("D");
         }
 
-        public static List<SchemeItem> LoadSchemes(ProfileItem profile, SchemeItem daily)
+        public static List<SchemeItem> LoadSchemes(ProfileItem profile, SchemeItem daily, List<SchemeItem> known)
         {
             List<SchemeItem> result = new List<SchemeItem>();
-            List<SchemeItem> known = FixedCatalog.LoadSchemes();
             using (RegistryKey group = Registry.LocalMachine.OpenSubKey(Root + Processor.ToString("D")))
             {
                 if (group != null) foreach (string setting in group.GetSubKeyNames())
